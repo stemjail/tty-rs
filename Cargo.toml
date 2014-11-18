@@ -1,0 +1,16 @@
+[project]
+name = "pty"
+version = "0.0.0"
+authors = ["Mickaël Salaün <mickael.salaun@ssi.gouv.fr>"]
+
+[lib]
+name = "pty"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pty-spawn"
+path = "src/spawn.rs"
+
+[dependencies.termios]
+git = "https://github.com/nathan7/termios.rs.git"
+rev = "a7e88b29edbaa75fc1709f0f9bb00f354e727f2a"
