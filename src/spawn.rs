@@ -13,12 +13,11 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 extern crate libc;
-extern crate native;
 extern crate pty;
 
-use native::io::file::FileDesc;
 use pty::TtyProxy;
 use std::io;
+use std::io::fs::FileDesc;
 
 fn main() {
     let stdin = FileDesc::new(libc::STDIN_FILENO, false);

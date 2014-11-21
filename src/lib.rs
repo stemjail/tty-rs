@@ -13,14 +13,13 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 extern crate libc;
-extern crate native;
 extern crate termios;
 
 use self::libc::{size_t, ssize_t, c_ushort, c_void};
-use self::native::io::file::{fd_t, FileDesc};
 use self::termios::{Termio, Termios};
 use std::c_str::CString;
 use std::io;
+use std::io::fs::{AsFileDesc, fd_t, FileDesc};
 use std::io::process::InheritFd;
 use std::mem::transmute;
 use std::ptr;
@@ -28,8 +27,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Relaxed};
 
 mod raw {
+    use std::io::fs::fd_t;
     use super::libc::{c_char, c_int, c_longlong, size_t, ssize_t, c_uint, c_void};
-    use native::io::file::fd_t;
 
     // From x86_64-linux-gnu/bits/fcntl-linux.h
     #[cfg(target_arch="x86_64")]
@@ -206,11 +205,11 @@ impl TtyProxy {
         };
         let do_flush = self.do_flush.clone();
         let master_fd = self.pty.master.fd();
-        spawn(proc() splice_loop(do_flush, master_fd, m2p_tx.get_fd().unwrap()));
+        spawn(proc() splice_loop(do_flush, master_fd, m2p_tx.as_fd().fd()));
 
         let do_flush = self.do_flush.clone();
         let peer_fd = self.peer.fd();
-        spawn(proc() splice_loop(do_flush, m2p_rx.get_fd().unwrap(), peer_fd));
+        spawn(proc() splice_loop(do_flush, m2p_rx.as_fd().fd(), peer_fd));
 
         // Peer to master
         let (p2m_tx, p2m_rx) = match io::pipe::PipeStream::pair() {
@@ -219,11 +218,11 @@ impl TtyProxy {
         };
         let do_flush = self.do_flush.clone();
         let peer_fd = self.peer.fd();
-        spawn(proc() splice_loop(do_flush, peer_fd, p2m_tx.get_fd().unwrap()));
+        spawn(proc() splice_loop(do_flush, peer_fd, p2m_tx.as_fd().fd()));
 
         let do_flush = self.do_flush.clone();
         let master_fd = self.pty.master.fd();
-        spawn(proc() splice_loop(do_flush, p2m_rx.get_fd().unwrap(), master_fd));
+        spawn(proc() splice_loop(do_flush, p2m_rx.as_fd().fd(), master_fd));
 
         let slave = InheritFd(self.pty.slave.fd());
         // Force new session
