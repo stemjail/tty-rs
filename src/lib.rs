@@ -71,8 +71,8 @@ enum SpliceMode {
 
 fn splice(fd_in: &fd_t, fd_out: &fd_t, len: size_t, mode: SpliceMode) -> io::IoResult<ssize_t> {
     let flags = match mode {
-        Block => 0,
-        NonBlock => raw::SPLICE_F_NONBLOCK,
+        SpliceMode::Block => 0,
+        SpliceMode::NonBlock => raw::SPLICE_F_NONBLOCK,
     };
     match unsafe { raw::splice(*fd_in, ptr::null_mut(), *fd_out, ptr::null_mut(), len, flags) } {
         -1 => Err(io::IoError::last_error()),
@@ -150,7 +150,7 @@ fn splice_loop(do_flush: Arc<AtomicBool>, fd_in: fd_t, fd_out: fd_t) {
         }
         // FIXME: Add a select(2) watching for stdin and a pipe to stop the task
         // Need pipe to block on (the kernel only look at input)
-        match splice(&fd_in, &fd_out, SPLICE_BUFFER_SIZE, Block) {
+        match splice(&fd_in, &fd_out, SPLICE_BUFFER_SIZE, SpliceMode::Block) {
             Ok(..) => {},
             Err(e) => {
                 match e.kind {
