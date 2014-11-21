@@ -189,15 +189,17 @@ impl TtyProxy {
         let pty = try!(openpty(Some(termios_master), Some(size)));
         let do_flush = Arc::new(AtomicBool::new(false));
 
-        Ok(TtyProxy {
+        let tty = TtyProxy {
             pty: pty,
             peer: stdio,
             termios_orig: termios_orig,
             do_flush: do_flush,
-        })
+        };
+        try!(tty.create_proxy());
+        Ok(tty)
     }
 
-    pub fn spawn(&self, mut cmd: io::Command) -> io::IoResult<io::Process> {
+    fn create_proxy(&self) -> io::IoResult<()> {
         // Master to peer
         let (m2p_tx, m2p_rx) = match io::pipe::PipeStream::pair() {
             Ok(p) => (p.writer, p.reader),
@@ -224,6 +226,10 @@ impl TtyProxy {
         let master_fd = self.pty.master.fd();
         spawn(proc() splice_loop(do_flush, p2m_rx.as_fd().fd(), master_fd));
 
+        Ok(())
+    }
+
+    pub fn spawn(&self, mut cmd: io::Command) -> io::IoResult<io::Process> {
         let slave = InheritFd(self.pty.slave.fd());
         // Force new session
         // TODO: tcsetpgrp
