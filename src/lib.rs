@@ -178,10 +178,10 @@ impl TtyProxy {
         termios_peer.input_flags.remove(termios::IGNBRK);
         termios_peer.input_flags.insert(termios::BRKINT);
         termios_peer.input_flags.remove(termios::ICRNL);
-        termios_peer.control_chars[termios::VMIN as uint] = 1;
-        termios_peer.control_chars[termios::VTIME as uint] = 0;
+        termios_peer.control_chars[termios::ControlCharacter::VMIN as uint] = 1;
+        termios_peer.control_chars[termios::ControlCharacter::VTIME as uint] = 0;
         // XXX: cfmakeraw
-        try!(stdio.tcsetattr(termios::TCSAFLUSH, &termios_peer));
+        try!(stdio.tcsetattr(termios::When::TCSAFLUSH, &termios_peer));
 
         // TODO: Handle SIGWINCH to dynamically update WinSize
         // Native runtime does not support RtioTTY::get_winsize()
@@ -238,6 +238,6 @@ impl TtyProxy {
 impl Drop for TtyProxy {
     fn drop(&mut self) {
         self.do_flush.store(true, Relaxed);
-        let _ = self.peer.tcsetattr(termios::TCSAFLUSH, &self.termios_orig);
+        let _ = self.peer.tcsetattr(termios::When::TCSAFLUSH, &self.termios_orig);
     }
 }
