@@ -56,7 +56,7 @@ mod raw {
 
 // From termios.h
 #[repr(C)]
-pub struct WinSize {
+struct WinSize {
     ws_row: c_ushort,
     ws_col: c_ushort,
     ws_xpixel: c_ushort,
@@ -93,14 +93,14 @@ fn get_winsize(fd: &FileDesc) -> io::IoResult<WinSize> {
     }
 }
 
-pub struct Pty {
-    pub master: FileDesc,
-    pub slave: FileDesc,
-    pub name: String,
+struct Pty {
+    master: FileDesc,
+    slave: FileDesc,
+    name: String,
 }
 
 pub struct TtyServer {
-    pub pty: Pty,
+    pty: Pty,
 }
 
 pub struct TtyClient {
@@ -121,7 +121,7 @@ unsafe fn opt2ptr<T>(e: &Option<&T>) -> *const c_void {
 }
 
 // TODO: Return a StdStream (StdReader + StdWriter) or RtioTTY?
-pub fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty> {
+fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty> {
     let mut amaster: fd_t = -1;
     let mut aslave: fd_t = -1;
     let mut name = Vec::with_capacity(MAX_PATH);
@@ -187,6 +187,14 @@ impl TtyServer {
     pub fn new_client(&self, stdio: FileDesc) -> io::IoResult<TtyClient> {
         let master = FileDesc::new(self.pty.master.fd(), false);
         TtyClient::new(master, stdio)
+    }
+
+    pub fn get_master(&self) -> &FileDesc {
+        &self.pty.master
+    }
+
+    pub fn get_name(&self) -> &String {
+        &self.pty.name
     }
 
     pub fn spawn(&self, mut cmd: io::Command) -> io::IoResult<io::Process> {

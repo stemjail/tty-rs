@@ -25,7 +25,7 @@ fn main() {
         Ok(s) => s,
         Err(e) => panic!("Error TTY server: {}", e),
     };
-    println!("Got PTY {}", server.pty.name);
+    println!("Got PTY {}", server.get_name());
     let proxy = match server.new_client(stdin) {
         Ok(p) => p,
         Err(e) => panic!("Error TTY client: {}", e),
