@@ -109,15 +109,15 @@ pub struct TtyProxy {
 // From linux/limits.h
 const MAX_PATH: uint = 4096;
 
-unsafe fn opt2ptr<T>(e: &Option<T>) -> *const c_void {
+unsafe fn opt2ptr<T>(e: &Option<&T>) -> *const c_void {
     match e {
-        &Some(ref p) => transmute(p),
+        &Some(p) => transmute(p),
         &None => ptr::null(),
     }
 }
 
 // TODO: Return a StdStream (StdReader + StdWriter) or RtioTTY?
-pub fn openpty(termp: Option<Termios>, winp: Option<WinSize>) -> io::IoResult<Pty> {
+pub fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty> {
     let mut amaster: fd_t = -1;
     let mut aslave: fd_t = -1;
     let mut name = Vec::with_capacity(MAX_PATH);
@@ -171,7 +171,6 @@ impl TtyProxy {
         // Setup peer terminal configuration
         let mut termios_peer = try!(stdio.tcgetattr());
         let termios_master = try!(stdio.tcgetattr());
-        let termios_orig = try!(stdio.tcgetattr());
         termios_peer.local_flags.remove(termios::ECHO);
         termios_peer.local_flags.remove(termios::ICANON);
         termios_peer.local_flags.remove(termios::ISIG);
@@ -186,13 +185,13 @@ impl TtyProxy {
         // TODO: Handle SIGWINCH to dynamically update WinSize
         // Native runtime does not support RtioTTY::get_winsize()
         let size = try!(get_winsize(&stdio));
-        let pty = try!(openpty(Some(termios_master), Some(size)));
+        let pty = try!(openpty(Some(&termios_master), Some(&size)));
         let do_flush = Arc::new(AtomicBool::new(false));
 
         let tty = TtyProxy {
             pty: pty,
             peer: stdio,
-            termios_orig: termios_orig,
+            termios_orig: termios_master,
             do_flush: do_flush,
         };
         try!(tty.create_proxy());
