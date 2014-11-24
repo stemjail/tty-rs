@@ -15,21 +15,25 @@
 extern crate libc;
 extern crate pty;
 
-use pty::TtyProxy;
+use pty::TtyServer;
 use std::io;
 use std::io::fs::FileDesc;
 
 fn main() {
     let stdin = FileDesc::new(libc::STDIN_FILENO, false);
-    let proxy = match TtyProxy::new(stdin) {
-        Ok(p) => p,
-        Err(e) => panic!("Error alloc_pty: {}", e),
+    let server = match TtyServer::new(&stdin) {
+        Ok(s) => s,
+        Err(e) => panic!("Error TTY server: {}", e),
     };
-    println!("Got PTY {}", proxy.pty.name);
+    println!("Got PTY {}", server.pty.name);
+    let proxy = match server.new_client(stdin) {
+        Ok(p) => p,
+        Err(e) => panic!("Error TTY client: {}", e),
+    };
 
     // Should call setsid -c sh
     let cmd = io::Command::new(Path::new("/bin/sh"));
-    let mut process = match proxy.spawn(cmd) {
+    let mut process = match server.spawn(cmd) {
         Ok(p) => p,
         Err(e) => panic!("Fail to execute process: {}", e),
     };
@@ -38,4 +42,3 @@ fn main() {
     println!("quit with {}", ret);
     drop(proxy);
 }
-

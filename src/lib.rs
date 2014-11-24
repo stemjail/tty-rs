@@ -99,9 +99,13 @@ pub struct Pty {
     pub name: String,
 }
 
-pub struct TtyProxy {
+pub struct TtyServer {
     pub pty: Pty,
-    pub peer: FileDesc,
+}
+
+pub struct TtyClient {
+    master: FileDesc,
+    peer: FileDesc,
     termios_orig: Termios,
     do_flush: Arc<AtomicBool>,
 }
@@ -166,11 +170,42 @@ fn splice_loop(do_flush: Arc<AtomicBool>, fd_in: fd_t, fd_out: fd_t) {
     }
 }
 
-impl TtyProxy {
-    pub fn new(stdio: FileDesc) -> io::IoResult<TtyProxy> {
+
+impl TtyServer {
+    pub fn new(template: &FileDesc) -> io::IoResult<TtyServer> {
+        let termios = try!(template.tcgetattr());
+        // TODO: Handle SIGWINCH to dynamically update WinSize
+        // Native runtime does not support RtioTTY::get_winsize()
+        let size = try!(get_winsize(template));
+        let pty = try!(openpty(Some(&termios), Some(&size)));
+
+        Ok(TtyServer {
+            pty: pty,
+        })
+    }
+
+    pub fn new_client(&self, stdio: FileDesc) -> io::IoResult<TtyClient> {
+        let master = FileDesc::new(self.pty.master.fd(), false);
+        TtyClient::new(master, stdio)
+    }
+
+    pub fn spawn(&self, mut cmd: io::Command) -> io::IoResult<io::Process> {
+        let slave = InheritFd(self.pty.slave.fd());
+        // Force new session
+        // TODO: tcsetpgrp
+        cmd.stdin(slave).
+            stdout(slave).
+            stderr(slave).
+            detached().
+            spawn()
+    }
+}
+
+impl TtyClient {
+    pub fn new(master: FileDesc, stdio: FileDesc) -> io::IoResult<TtyClient> {
         // Setup peer terminal configuration
+        let termios_orig = try!(stdio.tcgetattr());
         let mut termios_peer = try!(stdio.tcgetattr());
-        let termios_master = try!(stdio.tcgetattr());
         termios_peer.local_flags.remove(termios::ECHO);
         termios_peer.local_flags.remove(termios::ICANON);
         termios_peer.local_flags.remove(termios::ISIG);
@@ -182,16 +217,11 @@ impl TtyProxy {
         // XXX: cfmakeraw
         try!(stdio.tcsetattr(termios::When::TCSAFLUSH, &termios_peer));
 
-        // TODO: Handle SIGWINCH to dynamically update WinSize
-        // Native runtime does not support RtioTTY::get_winsize()
-        let size = try!(get_winsize(&stdio));
-        let pty = try!(openpty(Some(&termios_master), Some(&size)));
         let do_flush = Arc::new(AtomicBool::new(false));
-
-        let tty = TtyProxy {
-            pty: pty,
+        let tty = TtyClient {
+            master: master,
             peer: stdio,
-            termios_orig: termios_master,
+            termios_orig: termios_orig,
             do_flush: do_flush,
         };
         try!(tty.create_proxy());
@@ -205,7 +235,7 @@ impl TtyProxy {
             Err(e) => return Err(e),
         };
         let do_flush = self.do_flush.clone();
-        let master_fd = self.pty.master.fd();
+        let master_fd = self.master.fd();
         spawn(proc() splice_loop(do_flush, master_fd, m2p_tx.as_fd().fd()));
 
         let do_flush = self.do_flush.clone();
@@ -222,25 +252,14 @@ impl TtyProxy {
         spawn(proc() splice_loop(do_flush, peer_fd, p2m_tx.as_fd().fd()));
 
         let do_flush = self.do_flush.clone();
-        let master_fd = self.pty.master.fd();
+        let master_fd = self.master.fd();
         spawn(proc() splice_loop(do_flush, p2m_rx.as_fd().fd(), master_fd));
 
         Ok(())
     }
-
-    pub fn spawn(&self, mut cmd: io::Command) -> io::IoResult<io::Process> {
-        let slave = InheritFd(self.pty.slave.fd());
-        // Force new session
-        // TODO: tcsetpgrp
-        cmd.stdin(slave).
-            stdout(slave).
-            stderr(slave).
-            detached().
-            spawn()
-    }
 }
 
-impl Drop for TtyProxy {
+impl Drop for TtyClient {
     fn drop(&mut self) {
         self.do_flush.store(true, Relaxed);
         let _ = self.peer.tcsetattr(termios::When::TCSAFLUSH, &self.termios_orig);
