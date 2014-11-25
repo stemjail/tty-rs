@@ -214,6 +214,11 @@ impl TtyServer {
         &self.master
     }
 
+    /// Take the TTY slave file descriptor to manually pass it to a process
+    pub fn take_slave(&mut self) -> Option<FileDesc> {
+        self.slave.take()
+    }
+
     /// Spawn a new process connected to the slave TTY
     pub fn spawn(&mut self, mut cmd: io::Command) -> io::IoResult<io::Process> {
         let mut drop_slave = false;
