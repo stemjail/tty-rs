@@ -180,6 +180,7 @@ fn splice_loop(do_flush: Arc<AtomicBool>, flush_event: Option<Sender<()>>, fd_in
 
 
 impl TtyServer {
+    /// Create a new TTY with the same configuration (termios and size) as the `template` TTY
     pub fn new(template: &FileDesc) -> io::IoResult<TtyServer> {
         let termios = try!(template.tcgetattr());
         // TODO: Handle SIGWINCH to dynamically update WinSize
@@ -194,19 +195,23 @@ impl TtyServer {
         })
     }
 
-    pub fn new_client(&self, stdio: FileDesc) -> io::IoResult<TtyClient> {
+    /// Bind the peer TTY with the server TTY
+    pub fn new_client(&self, peer: FileDesc) -> io::IoResult<TtyClient> {
         let master = FileDesc::new(self.master.fd(), false);
-        TtyClient::new(master, stdio)
+        TtyClient::new(master, peer)
     }
 
+    /// Get the TTY master file descriptor usable by a `TtyClient`
     pub fn get_master(&self) -> &FileDesc {
         &self.master
     }
 
+    /// Get the server TTY name
     pub fn get_name(&self) -> &String {
         &self.name
     }
 
+    /// Spawn a new process connected to the slave TTY
     pub fn spawn(&mut self, mut cmd: io::Command) -> io::IoResult<io::Process> {
         let mut drop_slave = false;
         let ret = match self.slave {
@@ -232,10 +237,11 @@ impl TtyServer {
 }
 
 impl TtyClient {
-    pub fn new(master: FileDesc, stdio: FileDesc) -> io::IoResult<TtyClient> {
+    /// Setup the peer TTY client (e.g. stdio) and bind it to the master TTY server
+    pub fn new(master: FileDesc, peer: FileDesc) -> io::IoResult<TtyClient> {
         // Setup peer terminal configuration
-        let termios_orig = try!(stdio.tcgetattr());
-        let mut termios_peer = try!(stdio.tcgetattr());
+        let termios_orig = try!(peer.tcgetattr());
+        let mut termios_peer = try!(peer.tcgetattr());
         termios_peer.local_flags.remove(termios::ECHO);
         termios_peer.local_flags.remove(termios::ICANON);
         termios_peer.local_flags.remove(termios::ISIG);
@@ -245,7 +251,7 @@ impl TtyClient {
         termios_peer.control_chars[termios::ControlCharacter::VMIN as uint] = 1;
         termios_peer.control_chars[termios::ControlCharacter::VTIME as uint] = 0;
         // XXX: cfmakeraw
-        try!(stdio.tcsetattr(termios::When::TCSAFLUSH, &termios_peer));
+        try!(peer.tcsetattr(termios::When::TCSAFLUSH, &termios_peer));
 
         // Create the proxy
         let do_flush_main = Arc::new(AtomicBool::new(false));
@@ -261,7 +267,7 @@ impl TtyClient {
         spawn(proc() splice_loop(do_flush, None, master_fd, m2p_tx.as_fd().fd()));
 
         let do_flush = do_flush_main.clone();
-        let peer_fd = stdio.fd();
+        let peer_fd = peer.fd();
         spawn(proc() splice_loop(do_flush, None, m2p_rx.as_fd().fd(), peer_fd));
 
         // Peer to master
@@ -270,7 +276,7 @@ impl TtyClient {
             Err(e) => return Err(e),
         };
         let do_flush = do_flush_main.clone();
-        let peer_fd = stdio.fd();
+        let peer_fd = peer.fd();
         spawn(proc() splice_loop(do_flush, None, peer_fd, p2m_tx.as_fd().fd()));
 
         let do_flush = do_flush_main.clone();
@@ -278,13 +284,14 @@ impl TtyClient {
         spawn(proc() splice_loop(do_flush, Some(event_tx), p2m_rx.as_fd().fd(), master_fd));
 
         Ok(TtyClient {
-            peer: stdio,
+            peer: peer,
             termios_orig: termios_orig,
             do_flush: do_flush_main,
             flush_event: event_rx,
         })
     }
 
+    /// Wait until the TTY binding broke (e.g. the connected process exited)
     pub fn wait(&self) {
         while !self.do_flush.load(Relaxed) {
             let _ = self.flush_event.recv_opt();
@@ -293,6 +300,7 @@ impl TtyClient {
 }
 
 impl Drop for TtyClient {
+    /// Cleanup the peer TTY
     fn drop(&mut self) {
         self.do_flush.store(true, Relaxed);
         let _ = self.peer.tcsetattr(termios::When::TCSAFLUSH, &self.termios_orig);
