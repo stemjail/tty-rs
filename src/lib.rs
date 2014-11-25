@@ -96,13 +96,13 @@ fn get_winsize(fd: &FileDesc) -> io::IoResult<WinSize> {
 struct Pty {
     master: FileDesc,
     slave: FileDesc,
-    name: String,
+    path: Path,
 }
 
 pub struct TtyServer {
     master: FileDesc,
     slave: Option<FileDesc>,
-    name: String,
+    path: Path,
 }
 
 pub struct TtyClient {
@@ -137,8 +137,11 @@ fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty>
             Ok(Pty{
                 master: FileDesc::new(amaster, true),
                 slave: FileDesc::new(aslave, true),
-                name: match n.as_str() {
-                    Some(s) => s.to_string(),
+                path: match n.as_str() {
+                    Some(s) => match Path::new_opt(s) {
+                        Some(p) => p,
+                        None => return Err(io::standard_error(io::OtherIoError)),
+                    },
                     None => return Err(io::standard_error(io::OtherIoError)),
                 }
             })
@@ -191,7 +194,7 @@ impl TtyServer {
         Ok(TtyServer {
             master: pty.master,
             slave: Some(pty.slave),
-            name: pty.name,
+            path: pty.path,
         })
     }
 
@@ -206,9 +209,9 @@ impl TtyServer {
         &self.master
     }
 
-    /// Get the server TTY name
-    pub fn get_name(&self) -> &String {
-        &self.name
+    /// Get the server TTY path
+    pub fn get_path(&self) -> &Path {
+        &self.path
     }
 
     /// Spawn a new process connected to the slave TTY
