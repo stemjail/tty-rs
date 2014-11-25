@@ -100,14 +100,16 @@ struct Pty {
 }
 
 pub struct TtyServer {
-    pty: Pty,
+    master: FileDesc,
+    slave: Option<FileDesc>,
+    name: String,
 }
 
 pub struct TtyClient {
-    master: FileDesc,
     peer: FileDesc,
     termios_orig: Termios,
     do_flush: Arc<AtomicBool>,
+    flush_event: Receiver<()>,
 }
 
 // From linux/limits.h
@@ -147,7 +149,7 @@ fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty>
 
 static SPLICE_BUFFER_SIZE: size_t = 1024;
 
-fn splice_loop(do_flush: Arc<AtomicBool>, fd_in: fd_t, fd_out: fd_t) {
+fn splice_loop(do_flush: Arc<AtomicBool>, flush_event: Option<Sender<()>>, fd_in: fd_t, fd_out: fd_t) {
     'select: loop {
         if do_flush.load(Relaxed) {
             break 'select;
@@ -168,6 +170,12 @@ fn splice_loop(do_flush: Arc<AtomicBool>, fd_in: fd_t, fd_out: fd_t) {
             }
         }
     }
+    match flush_event {
+        Some(event) => {
+            let _ = event.send_opt(());
+        },
+        None => {}
+    }
 }
 
 
@@ -180,32 +188,46 @@ impl TtyServer {
         let pty = try!(openpty(Some(&termios), Some(&size)));
 
         Ok(TtyServer {
-            pty: pty,
+            master: pty.master,
+            slave: Some(pty.slave),
+            name: pty.name,
         })
     }
 
     pub fn new_client(&self, stdio: FileDesc) -> io::IoResult<TtyClient> {
-        let master = FileDesc::new(self.pty.master.fd(), false);
+        let master = FileDesc::new(self.master.fd(), false);
         TtyClient::new(master, stdio)
     }
 
     pub fn get_master(&self) -> &FileDesc {
-        &self.pty.master
+        &self.master
     }
 
     pub fn get_name(&self) -> &String {
-        &self.pty.name
+        &self.name
     }
 
-    pub fn spawn(&self, mut cmd: io::Command) -> io::IoResult<io::Process> {
-        let slave = InheritFd(self.pty.slave.fd());
-        // Force new session
-        // TODO: tcsetpgrp
-        cmd.stdin(slave).
-            stdout(slave).
-            stderr(slave).
-            detached().
-            spawn()
+    pub fn spawn(&mut self, mut cmd: io::Command) -> io::IoResult<io::Process> {
+        let mut drop_slave = false;
+        let ret = match self.slave {
+            Some(ref slave) => {
+                drop_slave = true;
+                let slave = InheritFd(slave.fd());
+                // Force new session
+                // TODO: tcsetpgrp
+                cmd.stdin(slave).
+                    stdout(slave).
+                    stderr(slave).
+                    detached().
+                    spawn()
+            },
+            None => Err(io::standard_error(io::BrokenPipe))
+        };
+        if drop_slave {
+            // Must close the slave file descriptor to not wait indefinitely the end of the proxy
+            self.slave = None;
+        }
+        ret
     }
 }
 
@@ -225,45 +247,48 @@ impl TtyClient {
         // XXX: cfmakeraw
         try!(stdio.tcsetattr(termios::When::TCSAFLUSH, &termios_peer));
 
-        let do_flush = Arc::new(AtomicBool::new(false));
-        let tty = TtyClient {
-            master: master,
-            peer: stdio,
-            termios_orig: termios_orig,
-            do_flush: do_flush,
-        };
-        try!(tty.create_proxy());
-        Ok(tty)
-    }
+        // Create the proxy
+        let do_flush_main = Arc::new(AtomicBool::new(false));
+        let (event_tx, event_rx): (Sender<()>, Receiver<()>) = channel();
 
-    fn create_proxy(&self) -> io::IoResult<()> {
         // Master to peer
         let (m2p_tx, m2p_rx) = match io::pipe::PipeStream::pair() {
             Ok(p) => (p.writer, p.reader),
             Err(e) => return Err(e),
         };
-        let do_flush = self.do_flush.clone();
-        let master_fd = self.master.fd();
-        spawn(proc() splice_loop(do_flush, master_fd, m2p_tx.as_fd().fd()));
+        let do_flush = do_flush_main.clone();
+        let master_fd = master.fd();
+        spawn(proc() splice_loop(do_flush, None, master_fd, m2p_tx.as_fd().fd()));
 
-        let do_flush = self.do_flush.clone();
-        let peer_fd = self.peer.fd();
-        spawn(proc() splice_loop(do_flush, m2p_rx.as_fd().fd(), peer_fd));
+        let do_flush = do_flush_main.clone();
+        let peer_fd = stdio.fd();
+        spawn(proc() splice_loop(do_flush, None, m2p_rx.as_fd().fd(), peer_fd));
 
         // Peer to master
         let (p2m_tx, p2m_rx) = match io::pipe::PipeStream::pair() {
             Ok(p) => (p.writer, p.reader),
             Err(e) => return Err(e),
         };
-        let do_flush = self.do_flush.clone();
-        let peer_fd = self.peer.fd();
-        spawn(proc() splice_loop(do_flush, peer_fd, p2m_tx.as_fd().fd()));
+        let do_flush = do_flush_main.clone();
+        let peer_fd = stdio.fd();
+        spawn(proc() splice_loop(do_flush, None, peer_fd, p2m_tx.as_fd().fd()));
 
-        let do_flush = self.do_flush.clone();
-        let master_fd = self.master.fd();
-        spawn(proc() splice_loop(do_flush, p2m_rx.as_fd().fd(), master_fd));
+        let do_flush = do_flush_main.clone();
+        let master_fd = master.fd();
+        spawn(proc() splice_loop(do_flush, Some(event_tx), p2m_rx.as_fd().fd(), master_fd));
 
-        Ok(())
+        Ok(TtyClient {
+            peer: stdio,
+            termios_orig: termios_orig,
+            do_flush: do_flush_main,
+            flush_event: event_rx,
+        })
+    }
+
+    pub fn wait(&self) {
+        while !self.do_flush.load(Relaxed) {
+            let _ = self.flush_event.recv_opt();
+        }
     }
 }
 

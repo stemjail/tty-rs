@@ -21,7 +21,7 @@ use std::io::fs::FileDesc;
 
 fn main() {
     let stdin = FileDesc::new(libc::STDIN_FILENO, false);
-    let server = match TtyServer::new(&stdin) {
+    let mut server = match TtyServer::new(&stdin) {
         Ok(s) => s,
         Err(e) => panic!("Error TTY server: {}", e),
     };
@@ -33,12 +33,11 @@ fn main() {
 
     // Should call setsid -c sh
     let cmd = io::Command::new(Path::new("/bin/sh"));
-    let mut process = match server.spawn(cmd) {
+    let process = match server.spawn(cmd) {
         Ok(p) => p,
         Err(e) => panic!("Fail to execute process: {}", e),
     };
     println!("spawned {}", process.id());
-    let ret = process.wait();
-    println!("quit with {}", ret);
-    drop(proxy);
+    proxy.wait();
+    println!("quit");
 }
