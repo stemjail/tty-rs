@@ -184,12 +184,12 @@ fn splice_loop(do_flush: Arc<AtomicBool>, flush_event: Option<Sender<()>>, fd_in
 
 impl TtyServer {
     /// Create a new TTY with the same configuration (termios and size) as the `template` TTY
-    pub fn new(template: &FileDesc) -> io::IoResult<TtyServer> {
-        let termios = try!(template.tcgetattr());
-        // TODO: Handle SIGWINCH to dynamically update WinSize
+    pub fn new(template: Option<&FileDesc>) -> io::IoResult<TtyServer> {
         // Native runtime does not support RtioTTY::get_winsize()
-        let size = try!(get_winsize(template));
-        let pty = try!(openpty(Some(&termios), Some(&size)));
+        let pty = match template {
+            Some(t) => try!(openpty(Some(&try!(t.tcgetattr())), Some(&try!(get_winsize(t))))),
+            None => try!(openpty(None, None)),
+        };
 
         Ok(TtyServer {
             master: pty.master,
@@ -244,6 +244,7 @@ impl TtyServer {
     }
 }
 
+// TODO: Handle SIGWINCH to dynamically update WinSize
 impl TtyClient {
     /// Setup the peer TTY client (e.g. stdio) and bind it to the master TTY server
     pub fn new(master: FileDesc, peer: FileDesc) -> io::IoResult<TtyClient> {

@@ -21,7 +21,7 @@ use std::io::fs::FileDesc;
 
 fn main() {
     let stdin = FileDesc::new(libc::STDIN_FILENO, false);
-    let mut server = match TtyServer::new(&stdin) {
+    let mut server = match TtyServer::new(Some(&stdin)) {
         Ok(s) => s,
         Err(e) => panic!("Error TTY server: {}", e),
     };
