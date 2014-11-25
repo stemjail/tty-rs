@@ -204,14 +204,14 @@ impl TtyServer {
         TtyClient::new(master, peer)
     }
 
-    /// Get the TTY master file descriptor usable by a `TtyClient`
-    pub fn get_master(&self) -> &FileDesc {
-        &self.master
-    }
-
     /// Get the server TTY path
     pub fn get_path(&self) -> &Path {
         &self.path
+    }
+
+    /// Get the TTY master file descriptor usable by a `TtyClient`
+    pub fn get_master(&self) -> &FileDesc {
+        &self.master
     }
 
     /// Spawn a new process connected to the slave TTY
