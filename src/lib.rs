@@ -106,6 +106,9 @@ pub struct TtyServer {
 }
 
 pub struct TtyClient {
+    // Need to keep the master file descriptor open
+    #[allow(dead_code)]
+    master: FileDesc,
     peer: FileDesc,
     termios_orig: Termios,
     do_flush: Arc<AtomicBool>,
@@ -293,6 +296,7 @@ impl TtyClient {
         spawn(proc() splice_loop(do_flush, Some(event_tx), p2m_rx.as_fd().fd(), master_fd));
 
         Ok(TtyClient {
+            master: master,
             peer: peer,
             termios_orig: termios_orig,
             do_flush: do_flush_main,
