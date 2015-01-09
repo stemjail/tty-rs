@@ -276,11 +276,11 @@ impl TtyClient {
         };
         let do_flush = do_flush_main.clone();
         let master_fd = master.fd();
-        spawn(proc() splice_loop(do_flush, None, master_fd, m2p_tx.as_fd().fd()));
+        spawn(move || splice_loop(do_flush, None, master_fd, m2p_tx.as_fd().fd()));
 
         let do_flush = do_flush_main.clone();
         let peer_fd = peer.fd();
-        spawn(proc() splice_loop(do_flush, None, m2p_rx.as_fd().fd(), peer_fd));
+        spawn(move || splice_loop(do_flush, None, m2p_rx.as_fd().fd(), peer_fd));
 
         // Peer to master
         let (p2m_tx, p2m_rx) = match io::pipe::PipeStream::pair() {
@@ -289,11 +289,11 @@ impl TtyClient {
         };
         let do_flush = do_flush_main.clone();
         let peer_fd = peer.fd();
-        spawn(proc() splice_loop(do_flush, None, peer_fd, p2m_tx.as_fd().fd()));
+        spawn(move || splice_loop(do_flush, None, peer_fd, p2m_tx.as_fd().fd()));
 
         let do_flush = do_flush_main.clone();
         let master_fd = master.fd();
-        spawn(proc() splice_loop(do_flush, Some(event_tx), p2m_rx.as_fd().fd(), master_fd));
+        spawn(move || splice_loop(do_flush, Some(event_tx), p2m_rx.as_fd().fd(), master_fd));
 
         Ok(TtyClient {
             master: master,
