@@ -17,7 +17,7 @@ extern crate termios;
 
 use self::libc::{size_t, ssize_t, c_ushort, c_void};
 use self::termios::{Termio, Termios};
-use std::c_str::CString;
+use std::ffi::CString;
 use std::io;
 use std::io::fs::{AsFileDesc, fd_t, FileDesc};
 use std::io::process::InheritFd;
@@ -135,7 +135,8 @@ fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty>
     match unsafe { raw::openpty(&mut amaster, &mut aslave, name.as_mut_ptr(),
             opt2ptr(&termp), opt2ptr(&winp)) } {
         0 => {
-            let n = unsafe { CString::new(name.as_ptr(), false) };
+            // XXX: Should not panic
+            let n = CString::from_vec(name);
             // TODO: Add signal handler for SIGWINCH
             Ok(Pty{
                 master: FileDesc::new(amaster, true),
