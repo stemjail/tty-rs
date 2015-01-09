@@ -24,7 +24,9 @@ use std::mem::transmute;
 use std::os::unix::Fd;
 use std::ptr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Relaxed};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sys::fs::FileDesc;
 
 mod raw {
