@@ -28,6 +28,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sys::fs::FileDesc;
+use std::thread::Thread;
 
 mod raw {
     use std::os::unix::Fd;
@@ -254,6 +255,7 @@ impl TtyServer {
 }
 
 // TODO: Handle SIGWINCH to dynamically update WinSize
+// TODO: Replace `spawn` with `scoped` and share variables
 impl TtyClient {
     /// Setup the peer TTY client (e.g. stdio) and bind it to the master TTY server
     pub fn new(master: FileDesc, peer: FileDesc) -> io::IoResult<TtyClient> {
@@ -282,11 +284,11 @@ impl TtyClient {
         };
         let do_flush = do_flush_main.clone();
         let master_fd = master.fd();
-        spawn(move || splice_loop(do_flush, None, master_fd, m2p_tx.as_fd().fd()));
+        Thread::spawn(move || splice_loop(do_flush, None, master_fd, m2p_tx.as_fd().fd()));
 
         let do_flush = do_flush_main.clone();
         let peer_fd = peer.fd();
-        spawn(move || splice_loop(do_flush, None, m2p_rx.as_fd().fd(), peer_fd));
+        Thread::spawn(move || splice_loop(do_flush, None, m2p_rx.as_fd().fd(), peer_fd));
 
         // Peer to master
         let (p2m_tx, p2m_rx) = match io::pipe::PipeStream::pair() {
@@ -295,11 +297,11 @@ impl TtyClient {
         };
         let do_flush = do_flush_main.clone();
         let peer_fd = peer.fd();
-        spawn(move || splice_loop(do_flush, None, peer_fd, p2m_tx.as_fd().fd()));
+        Thread::spawn(move || splice_loop(do_flush, None, peer_fd, p2m_tx.as_fd().fd()));
 
         let do_flush = do_flush_main.clone();
         let master_fd = master.fd();
-        spawn(move || splice_loop(do_flush, Some(event_tx), p2m_rx.as_fd().fd(), master_fd));
+        Thread::spawn(move || splice_loop(do_flush, Some(event_tx), p2m_rx.as_fd().fd(), master_fd));
 
         Ok(TtyClient {
             master: master,
