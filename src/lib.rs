@@ -19,15 +19,16 @@ use self::libc::{size_t, ssize_t, c_ushort, c_void};
 use self::termios::{Termio, Termios};
 use std::ffi::CString;
 use std::io;
-use std::io::fs::{AsFileDesc, fd_t, FileDesc};
 use std::io::process::InheritFd;
 use std::mem::transmute;
+use std::os::unix::Fd;
 use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Relaxed};
+use std::sys::fs::FileDesc;
 
 mod raw {
-    use std::io::fs::fd_t;
+    use std::os::unix::Fd;
     use super::libc::{c_char, c_int, c_longlong, size_t, ssize_t, c_uint, c_void};
 
     // From x86_64-linux-gnu/bits/fcntl-linux.h
@@ -43,13 +44,13 @@ mod raw {
 
     extern {
         pub fn ioctl(fd: c_int, req: c_int, ...) -> c_int;
-        pub fn splice(fd_in: fd_t, off_in: *mut loff_t, fd_out: fd_t, off_out: *mut loff_t,
+        pub fn splice(fd_in: Fd, off_in: *mut loff_t, fd_out: Fd, off_out: *mut loff_t,
                       len: size_t, flags: c_uint) -> ssize_t;
     }
 
     #[link(name = "util")]
     extern {
-        pub fn openpty(amaster: *mut fd_t, aslave: *mut fd_t, name: *mut c_char,
+        pub fn openpty(amaster: *mut Fd, aslave: *mut Fd, name: *mut c_char,
                        termp: *const c_void, winp: *const c_void) -> c_int;
     }
 }
@@ -69,7 +70,8 @@ enum SpliceMode {
     NonBlock
 }
 
-fn splice(fd_in: &fd_t, fd_out: &fd_t, len: size_t, mode: SpliceMode) -> io::IoResult<ssize_t> {
+// TODO: Replace most &Fd with AsRawFd
+fn splice(fd_in: &Fd, fd_out: &Fd, len: size_t, mode: SpliceMode) -> io::IoResult<ssize_t> {
     let flags = match mode {
         SpliceMode::Block => 0,
         SpliceMode::NonBlock => raw::SPLICE_F_NONBLOCK,
@@ -127,8 +129,8 @@ unsafe fn opt2ptr<T>(e: &Option<&T>) -> *const c_void {
 
 // TODO: Return a StdStream (StdReader + StdWriter) or RtioTTY?
 fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty> {
-    let mut amaster: fd_t = -1;
-    let mut aslave: fd_t = -1;
+    let mut amaster: Fd = -1;
+    let mut aslave: Fd = -1;
     let mut name = Vec::with_capacity(MAX_PATH);
 
     // TODO: Add a lock for future execve because close-on-exec
@@ -156,7 +158,7 @@ fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty>
 
 static SPLICE_BUFFER_SIZE: size_t = 1024;
 
-fn splice_loop(do_flush: Arc<AtomicBool>, flush_event: Option<Sender<()>>, fd_in: fd_t, fd_out: fd_t) {
+fn splice_loop(do_flush: Arc<AtomicBool>, flush_event: Option<Sender<()>>, fd_in: Fd, fd_out: Fd) {
     'select: loop {
         if do_flush.load(Relaxed) {
             break 'select;
@@ -186,6 +188,7 @@ fn splice_loop(do_flush: Arc<AtomicBool>, flush_event: Option<Sender<()>>, fd_in
 }
 
 
+// TODO: Replace most &FileDesc with AsRawFd
 impl TtyServer {
     /// Create a new TTY with the same configuration (termios and size) as the `template` TTY
     pub fn new(template: Option<&FileDesc>) -> io::IoResult<TtyServer> {
