@@ -12,6 +12,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+extern crate iohandle;
 extern crate libc;
 extern crate termios;
 
@@ -21,14 +22,16 @@ use std::ffi::CString;
 use std::io;
 use std::io::process::InheritFd;
 use std::mem::transmute;
+use std::os::unix::AsRawFd;
 use std::os::unix::Fd;
 use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sys::fs::FileDesc;
 use std::thread::Thread;
+
+pub use iohandle::FileDesc;
 
 mod raw {
     use std::os::unix::Fd;
@@ -85,14 +88,14 @@ fn splice(fd_in: &Fd, fd_out: &Fd, len: size_t, mode: SpliceMode) -> io::IoResul
     }
 }
 
-fn get_winsize(fd: &FileDesc) -> io::IoResult<WinSize> {
+fn get_winsize(fd: &AsRawFd) -> io::IoResult<WinSize> {
     let mut ws = WinSize {
         ws_row: 0,
         ws_col: 0,
         ws_xpixel: 0,
         ws_ypixel: 0,
     };
-    match unsafe { raw::ioctl(fd.fd(), raw::TIOCGWINSZ, &mut ws) } {
+    match unsafe { raw::ioctl(fd.as_raw_fd(), raw::TIOCGWINSZ, &mut ws) } {
         0 => Ok(ws),
         _ => Err(io::standard_error(io::OtherIoError)),
     }
@@ -210,7 +213,7 @@ impl TtyServer {
 
     /// Bind the peer TTY with the server TTY
     pub fn new_client(&self, peer: FileDesc) -> io::IoResult<TtyClient> {
-        let master = FileDesc::new(self.master.fd(), false);
+        let master = FileDesc::new(self.master.as_raw_fd(), false);
         TtyClient::new(master, peer)
     }
 
@@ -235,7 +238,7 @@ impl TtyServer {
         let ret = match self.slave {
             Some(ref slave) => {
                 drop_slave = true;
-                let slave = InheritFd(slave.fd());
+                let slave = InheritFd(slave.as_raw_fd());
                 // Force new session
                 // TODO: tcsetpgrp
                 cmd.stdin(slave).
@@ -283,12 +286,12 @@ impl TtyClient {
             Err(e) => return Err(e),
         };
         let do_flush = do_flush_main.clone();
-        let master_fd = master.fd();
-        Thread::spawn(move || splice_loop(do_flush, None, master_fd, m2p_tx.as_fd().fd()));
+        let master_fd = master.as_raw_fd();
+        Thread::spawn(move || splice_loop(do_flush, None, master_fd, m2p_tx.as_raw_fd()));
 
         let do_flush = do_flush_main.clone();
-        let peer_fd = peer.fd();
-        Thread::spawn(move || splice_loop(do_flush, None, m2p_rx.as_fd().fd(), peer_fd));
+        let peer_fd = peer.as_raw_fd();
+        Thread::spawn(move || splice_loop(do_flush, None, m2p_rx.as_raw_fd(), peer_fd));
 
         // Peer to master
         let (p2m_tx, p2m_rx) = match io::pipe::PipeStream::pair() {
@@ -296,12 +299,12 @@ impl TtyClient {
             Err(e) => return Err(e),
         };
         let do_flush = do_flush_main.clone();
-        let peer_fd = peer.fd();
-        Thread::spawn(move || splice_loop(do_flush, None, peer_fd, p2m_tx.as_fd().fd()));
+        let peer_fd = peer.as_raw_fd();
+        Thread::spawn(move || splice_loop(do_flush, None, peer_fd, p2m_tx.as_raw_fd()));
 
         let do_flush = do_flush_main.clone();
-        let master_fd = master.fd();
-        Thread::spawn(move || splice_loop(do_flush, Some(event_tx), p2m_rx.as_fd().fd(), master_fd));
+        let master_fd = master.as_raw_fd();
+        Thread::spawn(move || splice_loop(do_flush, Some(event_tx), p2m_rx.as_raw_fd(), master_fd));
 
         Ok(TtyClient {
             master: master,

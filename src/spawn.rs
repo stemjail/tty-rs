@@ -15,9 +15,9 @@
 extern crate libc;
 extern crate pty;
 
+use pty::FileDesc;
 use pty::TtyServer;
 use std::io;
-use std::io::fs::FileDesc;
 
 fn main() {
     let stdin = FileDesc::new(libc::STDIN_FILENO, false);

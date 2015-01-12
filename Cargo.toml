@@ -11,5 +11,8 @@ path = "src/lib.rs"
 name = "pty-spawn"
 path = "src/spawn.rs"
 
+[dependencies.iohandle]
+path = "../iohandle-rs"
+
 [dependencies.termios]
 path = "../termios.rs"
