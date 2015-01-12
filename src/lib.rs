@@ -12,6 +12,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+#![allow(staged_unstable)]
+#![allow(staged_experimental)]
+
 extern crate iohandle;
 extern crate libc;
 extern crate termios;
@@ -140,7 +143,7 @@ fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty>
     let mut name = Vec::with_capacity(MAX_PATH);
 
     // TODO: Add a lock for future execve because close-on-exec
-    match unsafe { raw::openpty(&mut amaster, &mut aslave, name.as_mut_ptr(),
+    match unsafe { raw::openpty(&mut amaster, &mut aslave, name.as_mut_ptr() as *mut libc::c_char,
             opt2ptr(&termp), opt2ptr(&winp)) } {
         0 => {
             // XXX: Should not panic
@@ -149,11 +152,8 @@ fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty>
             Ok(Pty{
                 master: FileDesc::new(amaster, true),
                 slave: FileDesc::new(aslave, true),
-                path: match n.as_str() {
-                    Some(s) => match Path::new_opt(s) {
-                        Some(p) => p,
-                        None => return Err(io::standard_error(io::OtherIoError)),
-                    },
+                path: match Path::new_opt(n) {
+                    Some(p) => p,
                     None => return Err(io::standard_error(io::OtherIoError)),
                 }
             })
@@ -187,7 +187,7 @@ fn splice_loop(do_flush: Arc<AtomicBool>, flush_event: Option<Sender<()>>, fd_in
     }
     match flush_event {
         Some(event) => {
-            let _ = event.send_opt(());
+            let _ = event.send(());
         },
         None => {}
     }
@@ -318,7 +318,7 @@ impl TtyClient {
     /// Wait until the TTY binding broke (e.g. the connected process exited)
     pub fn wait(&self) {
         while !self.do_flush.load(Relaxed) {
-            let _ = self.flush_event.recv_opt();
+            let _ = self.flush_event.recv();
         }
     }
 }
