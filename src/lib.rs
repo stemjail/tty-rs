@@ -19,7 +19,7 @@ extern crate iohandle;
 extern crate libc;
 extern crate termios;
 
-use self::libc::{size_t, ssize_t, c_ushort, c_void};
+use self::libc::{c_char, c_ushort, c_void, size_t, strlen, ssize_t};
 use self::termios::{Termio, Termios};
 use std::ffi::CString;
 use std::io;
@@ -146,7 +146,14 @@ fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty>
     match unsafe { raw::openpty(&mut amaster, &mut aslave, name.as_mut_ptr() as *mut libc::c_char,
             opt2ptr(&termp), opt2ptr(&winp)) } {
         0 => {
-            // XXX: Should not panic
+            unsafe {
+                // FFI string hack because of the foolish openpty(3) API!
+                let ptr = name.as_ptr() as *const c_char;
+                // Don't lie to Rust about the buffer length from strlen(3)
+                name.set_len(1 +  strlen(ptr) as usize);
+                // Cleanly remove the trailing 0 for CString
+                let _ = name.pop();
+            }
             let n = CString::from_vec(name);
             // TODO: Add signal handler for SIGWINCH
             Ok(Pty{
