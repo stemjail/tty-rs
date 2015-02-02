@@ -127,7 +127,7 @@ pub struct TtyClient {
 }
 
 // From linux/limits.h
-const MAX_PATH: uint = 4096;
+const MAX_PATH: usize = 4096;
 
 unsafe fn opt2ptr<T>(e: &Option<&T>) -> *const c_void {
     match e {
@@ -278,8 +278,8 @@ impl TtyClient {
         termios_peer.input_flags.remove(termios::IGNBRK);
         termios_peer.input_flags.insert(termios::BRKINT);
         termios_peer.input_flags.remove(termios::ICRNL);
-        termios_peer.control_chars[termios::ControlCharacter::VMIN as uint] = 1;
-        termios_peer.control_chars[termios::ControlCharacter::VTIME as uint] = 0;
+        termios_peer.control_chars[termios::ControlCharacter::VMIN as usize] = 1;
+        termios_peer.control_chars[termios::ControlCharacter::VTIME as usize] = 0;
         // XXX: cfmakeraw
         try!(peer.tcsetattr(termios::When::TCSAFLUSH, &termios_peer));
 
