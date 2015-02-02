@@ -12,13 +12,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#![allow(staged_experimental)]
+#![feature(core)]
+#![feature(libc)]
+#![feature(std_misc)]
 
 extern crate libc;
 
 use std::os::unix::{AsRawFd, Fd};
 
-#[derive(Show)]
+#[derive(Debug)]
 #[cfg(unix)]
 pub struct FileDesc {
     fd: Fd,
