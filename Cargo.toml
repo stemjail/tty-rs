@@ -3,14 +3,6 @@ name = "pty"
 version = "0.0.0"
 authors = ["Mickaël Salaün <mickael.salaun@ssi.gouv.fr>"]
 
-[lib]
-name = "pty"
-path = "src/lib.rs"
-
-[[bin]]
-name = "pty-spawn"
-path = "src/spawn.rs"
-
 [dependencies.iohandle]
 path = "../iohandle-rs"
 
