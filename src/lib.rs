@@ -12,9 +12,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#![feature(io)]
 #![feature(libc)]
-#![feature(path)]
+#![feature(old_io)]
+#![feature(old_path)]
 #![feature(std_misc)]
 
 extern crate iohandle;
@@ -24,9 +24,9 @@ extern crate termios;
 use self::libc::{c_char, c_ushort, c_void, size_t, strlen, ssize_t};
 use self::termios::{Termio, Termios};
 use std::ffi::CString;
+use std::mem::transmute;
 use std::old_io as io;
 use std::old_io::process::InheritFd;
-use std::mem::transmute;
 use std::os::unix::AsRawFd;
 use std::os::unix::Fd;
 use std::ptr;
@@ -34,7 +34,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread::Thread;
+use std::thread;
 
 pub use iohandle::FileDesc;
 
@@ -156,7 +156,7 @@ fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty>
                 // Cleanly remove the trailing 0 for CString
                 let _ = name.pop();
             }
-            let n = CString::from_vec(name);
+            let n = try!(CString::new(name));
             // TODO: Add signal handler for SIGWINCH
             Ok(Pty{
                 master: FileDesc::new(amaster, true),
@@ -296,11 +296,11 @@ impl TtyClient {
         };
         let do_flush = do_flush_main.clone();
         let master_fd = master.as_raw_fd();
-        Thread::spawn(move || splice_loop(do_flush, None, master_fd, m2p_tx.as_raw_fd()));
+        thread::spawn(move || splice_loop(do_flush, None, master_fd, m2p_tx.as_raw_fd()));
 
         let do_flush = do_flush_main.clone();
         let peer_fd = peer.as_raw_fd();
-        Thread::spawn(move || splice_loop(do_flush, None, m2p_rx.as_raw_fd(), peer_fd));
+        thread::spawn(move || splice_loop(do_flush, None, m2p_rx.as_raw_fd(), peer_fd));
 
         // Peer to master
         let (p2m_tx, p2m_rx) = match io::pipe::PipeStream::pair() {
@@ -309,11 +309,11 @@ impl TtyClient {
         };
         let do_flush = do_flush_main.clone();
         let peer_fd = peer.as_raw_fd();
-        Thread::spawn(move || splice_loop(do_flush, None, peer_fd, p2m_tx.as_raw_fd()));
+        thread::spawn(move || splice_loop(do_flush, None, peer_fd, p2m_tx.as_raw_fd()));
 
         let do_flush = do_flush_main.clone();
         let master_fd = master.as_raw_fd();
-        Thread::spawn(move || splice_loop(do_flush, Some(event_tx), p2m_rx.as_raw_fd(), master_fd));
+        thread::spawn(move || splice_loop(do_flush, Some(event_tx), p2m_rx.as_raw_fd(), master_fd));
 
         Ok(TtyClient {
             master: master,
