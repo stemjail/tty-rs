@@ -39,7 +39,7 @@ fn main() {
     let cmd = io::Command::new(Path::new("/bin/sh"));
     let process = match server.spawn(cmd) {
         Ok(p) => p,
-        Err(e) => panic!("Fail to execute process: {}", e),
+        Err(e) => panic!("Failed to execute process: {}", e),
     };
     println!("spawned {}", process.id());
     proxy.wait();
