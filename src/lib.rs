@@ -13,21 +13,20 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 #![feature(libc)]
-#![feature(std_misc)]
 
 extern crate libc;
 
-use std::os::unix::{AsRawFd, Fd};
+use std::os::unix::io::{AsRawFd, RawFd};
 
 #[derive(Debug)]
 #[cfg(unix)]
 pub struct FileDesc {
-    fd: Fd,
+    fd: RawFd,
     close_on_drop: bool,
 }
 
 impl FileDesc {
-    pub fn new(fd: Fd, close_on_drop: bool) -> FileDesc {
+    pub fn new(fd: RawFd, close_on_drop: bool) -> FileDesc {
         FileDesc {
             fd: fd,
             close_on_drop: close_on_drop,
@@ -44,7 +43,7 @@ impl Drop for FileDesc {
 }
 
 impl AsRawFd for FileDesc {
-    fn as_raw_fd(&self) -> Fd {
+    fn as_raw_fd(&self) -> RawFd {
         self.fd
     }
 }
