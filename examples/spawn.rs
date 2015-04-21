@@ -12,16 +12,16 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#![feature(io)]
+#![allow(deprecated)]
 #![feature(libc)]
-#![feature(path)]
+#![feature(old_io)]
 
 extern crate libc;
 extern crate pty;
 
 use pty::FileDesc;
 use pty::TtyServer;
-use std::old_io as io;
+use std::old_io::Command;
 
 fn main() {
     let stdin = FileDesc::new(libc::STDIN_FILENO, false);
@@ -36,7 +36,7 @@ fn main() {
     };
 
     // Should call setsid -c sh
-    let cmd = io::Command::new(Path::new("/bin/sh"));
+    let cmd = Command::new("/bin/sh");
     let process = match server.spawn(cmd) {
         Ok(p) => p,
         Err(e) => panic!("Failed to execute process: {}", e),

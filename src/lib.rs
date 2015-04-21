@@ -12,34 +12,35 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+#![allow(deprecated)]
 #![feature(libc)]
 #![feature(old_io)]
-#![feature(old_path)]
-#![feature(std_misc)]
 
 extern crate iohandle;
 extern crate libc;
 extern crate termios;
 
-use self::libc::{c_char, c_ushort, c_void, size_t, strlen, ssize_t};
-use self::termios::{Termio, Termios};
+use libc::{c_char, c_ushort, c_void, size_t, strlen, ssize_t};
 use std::ffi::CString;
+use std::io;
 use std::mem::transmute;
-use std::old_io as io;
+use std::old_io::{BrokenPipe, Command, IoResult, Process, standard_error};
+use std::old_io::pipe::PipeStream;
 use std::old_io::process::InheritFd;
-use std::os::unix::AsRawFd;
-use std::os::unix::Fd;
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
+use termios::{Termio, Termios};
 
 pub use iohandle::FileDesc;
 
 mod raw {
-    use std::os::unix::Fd;
+    use std::os::unix::io::RawFd;
     use super::libc::{c_char, c_int, c_longlong, size_t, ssize_t, c_uint, c_void};
 
     // From x86_64-linux-gnu/bits/fcntl-linux.h
@@ -55,13 +56,13 @@ mod raw {
 
     extern {
         pub fn ioctl(fd: c_int, req: c_int, ...) -> c_int;
-        pub fn splice(fd_in: Fd, off_in: *mut loff_t, fd_out: Fd, off_out: *mut loff_t,
+        pub fn splice(fd_in: RawFd, off_in: *mut loff_t, fd_out: RawFd, off_out: *mut loff_t,
                       len: size_t, flags: c_uint) -> ssize_t;
     }
 
     #[link(name = "util")]
     extern {
-        pub fn openpty(amaster: *mut Fd, aslave: *mut Fd, name: *mut c_char,
+        pub fn openpty(amaster: *mut RawFd, aslave: *mut RawFd, name: *mut c_char,
                        termp: *const c_void, winp: *const c_void) -> c_int;
     }
 }
@@ -81,19 +82,19 @@ enum SpliceMode {
     NonBlock
 }
 
-// TODO: Replace most &Fd with AsRawFd
-fn splice(fd_in: &Fd, fd_out: &Fd, len: size_t, mode: SpliceMode) -> io::IoResult<ssize_t> {
+// TODO: Replace most &RawFd with AsRawFd
+fn splice(fd_in: &RawFd, fd_out: &RawFd, len: size_t, mode: SpliceMode) -> io::Result<ssize_t> {
     let flags = match mode {
         SpliceMode::Block => 0,
         SpliceMode::NonBlock => raw::SPLICE_F_NONBLOCK,
     };
     match unsafe { raw::splice(*fd_in, ptr::null_mut(), *fd_out, ptr::null_mut(), len, flags) } {
-        -1 => Err(io::IoError::last_error()),
+        -1 => Err(io::Error::last_os_error()),
         s => Ok(s),
     }
 }
 
-fn get_winsize(fd: &AsRawFd) -> io::IoResult<WinSize> {
+fn get_winsize(fd: &AsRawFd) -> io::Result<WinSize> {
     let mut ws = WinSize {
         ws_row: 0,
         ws_col: 0,
@@ -102,20 +103,20 @@ fn get_winsize(fd: &AsRawFd) -> io::IoResult<WinSize> {
     };
     match unsafe { raw::ioctl(fd.as_raw_fd(), raw::TIOCGWINSZ, &mut ws) } {
         0 => Ok(ws),
-        _ => Err(io::standard_error(io::OtherIoError)),
+        _ => Err(io::Error::last_os_error()),
     }
 }
 
 struct Pty {
     master: FileDesc,
     slave: FileDesc,
-    path: Path,
+    path: PathBuf,
 }
 
 pub struct TtyServer {
     master: FileDesc,
     slave: Option<FileDesc>,
-    path: Path,
+    path: PathBuf,
 }
 
 pub struct TtyClient {
@@ -139,9 +140,9 @@ unsafe fn opt2ptr<T>(e: &Option<&T>) -> *const c_void {
 }
 
 // TODO: Return a StdStream (StdReader + StdWriter) or RtioTTY?
-fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty> {
-    let mut amaster: Fd = -1;
-    let mut aslave: Fd = -1;
+fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::Result<Pty> {
+    let mut amaster: RawFd = -1;
+    let mut aslave: RawFd = -1;
     let mut name = Vec::with_capacity(MAX_PATH);
 
     // TODO: Add a lock for future execve because close-on-exec
@@ -157,23 +158,24 @@ fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::IoResult<Pty>
                 let _ = name.pop();
             }
             let n = try!(CString::new(name));
+            let n = match std::str::from_utf8(n.to_bytes()) {
+                Ok(n) => n,
+                Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
+            };
             // TODO: Add signal handler for SIGWINCH
             Ok(Pty{
                 master: FileDesc::new(amaster, true),
                 slave: FileDesc::new(aslave, true),
-                path: match Path::new_opt(n) {
-                    Some(p) => p,
-                    None => return Err(io::standard_error(io::OtherIoError)),
-                }
+                path: PathBuf::from(n),
             })
         }
-        _ => Err(io::IoError::last_error()),
+        _ => Err(io::Error::last_os_error()),
     }
 }
 
 static SPLICE_BUFFER_SIZE: size_t = 1024;
 
-fn splice_loop(do_flush: Arc<AtomicBool>, flush_event: Option<Sender<()>>, fd_in: Fd, fd_out: Fd) {
+fn splice_loop(do_flush: Arc<AtomicBool>, flush_event: Option<Sender<()>>, fd_in: RawFd, fd_out: RawFd) {
     'select: loop {
         if do_flush.load(Relaxed) {
             break 'select;
@@ -183,9 +185,8 @@ fn splice_loop(do_flush: Arc<AtomicBool>, flush_event: Option<Sender<()>>, fd_in
         match splice(&fd_in, &fd_out, SPLICE_BUFFER_SIZE, SpliceMode::Block) {
             Ok(..) => {},
             Err(e) => {
-                match e.kind {
-                    // io::BrokenPipe
-                    io::ResourceUnavailable => {},
+                match e.kind() {
+                    io::ErrorKind::BrokenPipe => {},
                     _ => {
                         do_flush.store(true, Relaxed);
                         break 'select;
@@ -206,7 +207,7 @@ fn splice_loop(do_flush: Arc<AtomicBool>, flush_event: Option<Sender<()>>, fd_in
 // TODO: Replace most &FileDesc with AsRawFd
 impl TtyServer {
     /// Create a new TTY with the same configuration (termios and size) as the `template` TTY
-    pub fn new(template: Option<&FileDesc>) -> io::IoResult<TtyServer> {
+    pub fn new(template: Option<&FileDesc>) -> io::Result<TtyServer> {
         // Native runtime does not support RtioTTY::get_winsize()
         let pty = match template {
             Some(t) => try!(openpty(Some(&try!(t.tcgetattr())), Some(&try!(get_winsize(t))))),
@@ -221,14 +222,14 @@ impl TtyServer {
     }
 
     /// Bind the peer TTY with the server TTY
-    pub fn new_client(&self, peer: FileDesc) -> io::IoResult<TtyClient> {
+    pub fn new_client(&self, peer: FileDesc) -> io::Result<TtyClient> {
         let master = FileDesc::new(self.master.as_raw_fd(), false);
         TtyClient::new(master, peer)
     }
 
     /// Get the server TTY path
     pub fn get_path(&self) -> &Path {
-        &self.path
+        self.path.as_path()
     }
 
     /// Get the TTY master file descriptor usable by a `TtyClient`
@@ -242,7 +243,7 @@ impl TtyServer {
     }
 
     /// Spawn a new process connected to the slave TTY
-    pub fn spawn(&mut self, mut cmd: io::Command) -> io::IoResult<io::Process> {
+    pub fn spawn(&mut self, mut cmd: Command) -> IoResult<Process> {
         let mut drop_slave = false;
         let ret = match self.slave {
             Some(ref slave) => {
@@ -256,7 +257,8 @@ impl TtyServer {
                     detached().
                     spawn()
             },
-            None => Err(io::standard_error(io::BrokenPipe))
+            // No TTY slave
+            None => Err(standard_error(BrokenPipe))
         };
         if drop_slave {
             // Must close the slave file descriptor to not wait indefinitely the end of the proxy
@@ -270,7 +272,7 @@ impl TtyServer {
 // TODO: Replace `spawn` with `scoped` and share variables
 impl TtyClient {
     /// Setup the peer TTY client (e.g. stdio) and bind it to the master TTY server
-    pub fn new(master: FileDesc, peer: FileDesc) -> io::IoResult<TtyClient> {
+    pub fn new(master: FileDesc, peer: FileDesc) -> io::Result<TtyClient> {
         // Setup peer terminal configuration
         let termios_orig = try!(peer.tcgetattr());
         let mut termios_peer = try!(peer.tcgetattr());
@@ -290,9 +292,9 @@ impl TtyClient {
         let (event_tx, event_rx): (Sender<()>, Receiver<()>) = channel();
 
         // Master to peer
-        let (m2p_tx, m2p_rx) = match io::pipe::PipeStream::pair() {
+        let (m2p_tx, m2p_rx) = match PipeStream::pair() {
             Ok(p) => (p.writer, p.reader),
-            Err(e) => return Err(e),
+            Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
         };
         let do_flush = do_flush_main.clone();
         let master_fd = master.as_raw_fd();
@@ -303,9 +305,9 @@ impl TtyClient {
         thread::spawn(move || splice_loop(do_flush, None, m2p_rx.as_raw_fd(), peer_fd));
 
         // Peer to master
-        let (p2m_tx, p2m_rx) = match io::pipe::PipeStream::pair() {
+        let (p2m_tx, p2m_rx) = match PipeStream::pair() {
             Ok(p) => (p.writer, p.reader),
-            Err(e) => return Err(e),
+            Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
         };
         let do_flush = do_flush_main.clone();
         let peer_fd = peer.as_raw_fd();
