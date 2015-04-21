@@ -227,11 +227,6 @@ impl TtyServer {
         TtyClient::new(master, peer)
     }
 
-    /// Get the server TTY path
-    pub fn get_path(&self) -> &Path {
-        self.path.as_path()
-    }
-
     /// Get the TTY master file descriptor usable by a `TtyClient`
     pub fn get_master(&self) -> &FileDesc {
         &self.master
@@ -265,6 +260,13 @@ impl TtyServer {
             self.slave = None;
         }
         ret
+    }
+}
+
+impl AsRef<Path> for TtyServer {
+    /// Get the server TTY path
+    fn as_ref(&self) -> &Path {
+        self.path.as_ref()
     }
 }
 

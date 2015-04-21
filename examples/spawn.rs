@@ -29,7 +29,7 @@ fn main() {
         Ok(s) => s,
         Err(e) => panic!("Error TTY server: {}", e),
     };
-    println!("Got PTY {}", server.get_path().display());
+    println!("Got PTY {}", server.as_ref().display());
     let proxy = match server.new_client(stdin) {
         Ok(p) => p,
         Err(e) => panic!("Error TTY client: {}", e),
