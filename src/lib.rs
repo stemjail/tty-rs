@@ -16,7 +16,6 @@
 #![feature(libc)]
 #![feature(old_io)]
 
-extern crate iohandle;
 extern crate libc;
 extern crate termios;
 
@@ -37,7 +36,9 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use termios::{Termio, Termios};
 
-pub use iohandle::FileDesc;
+pub use fd::FileDesc;
+
+mod fd;
 
 mod raw {
     use std::os::unix::io::RawFd;
