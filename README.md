@@ -1,14 +1,14 @@
 # pty-rs
 
 *pty* is a library to create and use a new pseudoterminal (PTY):
-* `TtyServer`: create a new PTY (with a `TtyClient`) and send TTY data to the master side
-* `TtyClient`: spawn a new command and give it a TTY slave side
-* `FileDesc`: file descriptor wrapper (closed when dropped)
+* `TtyServer`: create a PTY dedicated to a new command
+* `TtyClient`: forward I/O from an existing TTY (user terminal)
+* `FileDesc`: file descriptor wrapper
 
-The data transfert between the client and server sides is a zero-copy, thanks to `splice(2)` (Linux specific).
+The I/O forward uses `splice(2)`, which is Linux specific, enabling zero-copy transfers.
 
-For now, only Rust 1.0.0-beta can build this code because of the unfinished I/O reform.
-Also note that this library use *termios.rs* which is not available on *crates.io*.
+For now, only the Rust 1.0.0-beta compiler can build this code because of the unfinished I/O reform.
+Also note that this library uses *termios.rs* which is not available on *crates.io*.
 
 This library is a work in progress.
 The API may change.
