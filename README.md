@@ -7,5 +7,8 @@
 
 The data transfert between the client and server sides is a zero-copy, thanks to `splice(2)` (Linux specific).
 
+For now, only Rust 1.0.0-beta can build this code because of the unfinished I/O reform.
+Also note that this library use *termios.rs* which is not available on *crates.io*.
+
 This library is a work in progress.
 The API may change.
