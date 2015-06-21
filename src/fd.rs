@@ -12,7 +12,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::fs::File;
+use libc::c_int;
+use std::io;
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
 #[derive(Debug)]
 #[cfg(unix)]
@@ -28,6 +31,16 @@ impl FileDesc {
             close_on_drop: close_on_drop,
         }
     }
+
+    pub fn dup(&self) -> io::Result<FileDesc> {
+        Ok(FileDesc {
+            fd: match unsafe { ::libc::dup(self.fd) } {
+                -1 => return Err(io::Error::last_os_error()),
+                n => n,
+            },
+            close_on_drop: self.close_on_drop,
+        })
+    }
 }
 
 impl Drop for FileDesc {
@@ -41,5 +54,33 @@ impl Drop for FileDesc {
 impl AsRawFd for FileDesc {
     fn as_raw_fd(&self) -> RawFd {
         self.fd
+    }
+}
+
+impl Into<RawFd> for FileDesc {
+    fn into(mut self) -> RawFd {
+        self.close_on_drop = false;
+        self.fd
+    }
+}
+
+/// A pipe(2) interface
+pub struct Pipe {
+    pub reader: File,
+    pub writer: File,
+}
+
+impl Pipe {
+    pub fn new() -> io::Result<Pipe> {
+        let mut fds: (c_int, c_int) = (-1, -1);
+        let fdp: *mut c_int = unsafe { ::std::mem::transmute(&mut fds) };
+        // TODO: Use pipe2(2) with O_CLOEXEC
+        if unsafe { ::libc::pipe(fdp) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Pipe {
+            reader: unsafe { File::from_raw_fd(fds.0) },
+            writer: unsafe { File::from_raw_fd(fds.1) },
+        })
     }
 }

@@ -12,22 +12,23 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#![allow(deprecated)]
 #![feature(libc)]
-#![feature(old_io)]
+#![feature(process_extensions)]
+#![feature(process_session_leader)]
 
 extern crate libc;
 extern crate termios;
 
+use fd::Pipe;
 use libc::{c_char, c_ushort, c_void, size_t, strlen, ssize_t};
 use std::ffi::CString;
 use std::io;
 use std::mem::transmute;
-use std::old_io::{BrokenPipe, Command, IoResult, Process, standard_error};
-use std::old_io::pipe::PipeStream;
-use std::old_io::process::InheritFd;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::FromRawFd;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -239,28 +240,20 @@ impl TtyServer {
     }
 
     /// Spawn a new process connected to the slave TTY
-    pub fn spawn(&mut self, mut cmd: Command) -> IoResult<Process> {
-        let mut drop_slave = false;
-        let ret = match self.slave {
-            Some(ref slave) => {
-                drop_slave = true;
-                let slave = InheritFd(slave.as_raw_fd());
+    pub fn spawn(&mut self, mut cmd: Command) -> io::Result<Child> {
+        match self.slave.take() {
+            Some(slave) => {
                 // Force new session
                 // TODO: tcsetpgrp
-                cmd.stdin(slave).
-                    stdout(slave).
-                    stderr(slave).
-                    detached().
+                cmd.stdin(unsafe { Stdio::from_raw_fd(try!(slave.dup()).into()) }).
+                    stdout(unsafe { Stdio::from_raw_fd(try!(slave.dup()).into()) }).
+                    // Must close the slave FD to not wait indefinitely the end of the proxy
+                    stderr(unsafe { Stdio::from_raw_fd(slave.into()) }).
+                    session_leader(true).
                     spawn()
             },
-            // No TTY slave
-            None => Err(standard_error(BrokenPipe))
-        };
-        if drop_slave {
-            // Must close the slave file descriptor to not wait indefinitely the end of the proxy
-            self.slave = None;
+            None => Err(io::Error::new(io::ErrorKind::BrokenPipe, "No TTY slave")),
         }
-        ret
     }
 }
 
@@ -295,7 +288,7 @@ impl TtyClient {
         let (event_tx, event_rx): (Sender<()>, Receiver<()>) = channel();
 
         // Master to peer
-        let (m2p_tx, m2p_rx) = match PipeStream::pair() {
+        let (m2p_tx, m2p_rx) = match Pipe::new() {
             Ok(p) => (p.writer, p.reader),
             Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
         };
@@ -308,7 +301,7 @@ impl TtyClient {
         thread::spawn(move || splice_loop(do_flush, None, m2p_rx.as_raw_fd(), peer_fd));
 
         // Peer to master
-        let (p2m_tx, p2m_rx) = match PipeStream::pair() {
+        let (p2m_tx, p2m_rx) = match Pipe::new() {
             Ok(p) => (p.writer, p.reader),
             Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
         };

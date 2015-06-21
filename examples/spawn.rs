@@ -12,16 +12,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#![allow(deprecated)]
 #![feature(libc)]
-#![feature(old_io)]
+#![feature(process_id)]
 
 extern crate libc;
 extern crate pty;
 
 use pty::FileDesc;
 use pty::TtyServer;
-use std::old_io::Command;
+use std::process::Command;
 
 fn main() {
     let stdin = FileDesc::new(libc::STDIN_FILENO, false);
