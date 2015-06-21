@@ -244,8 +244,8 @@ impl TtyServer {
             Some(slave) => {
                 // Force new session
                 // TODO: tcsetpgrp
-                cmd.stdin(unsafe { Stdio::from_raw_fd(try!(slave.dup()).into()) }).
-                    stdout(unsafe { Stdio::from_raw_fd(try!(slave.dup()).into()) }).
+                cmd.stdin(unsafe { Stdio::from_raw_fd(slave.as_raw_fd()) }).
+                    stdout(unsafe { Stdio::from_raw_fd(slave.as_raw_fd()) }).
                     // Must close the slave FD to not wait indefinitely the end of the proxy
                     stderr(unsafe { Stdio::from_raw_fd(slave.into()) }).
                     session_leader(true).
