@@ -19,7 +19,6 @@
 extern crate libc;
 extern crate termios;
 
-use fd::Pipe;
 use libc::{c_char, c_ushort, c_void, size_t, strlen, ssize_t};
 use std::ffi::CString;
 use std::io;
@@ -37,7 +36,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use termios::{Termio, Termios};
 
-pub use fd::FileDesc;
+pub use fd::{FileDesc, Pipe};
 
 mod fd;
 
