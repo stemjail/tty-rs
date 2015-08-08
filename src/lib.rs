@@ -13,7 +13,6 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 #![feature(libc)]
-#![feature(process_extensions)]
 #![feature(process_session_leader)]
 
 extern crate libc;

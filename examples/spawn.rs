@@ -13,7 +13,6 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 #![feature(libc)]
-#![feature(process_id)]
 
 extern crate libc;
 extern crate pty;
