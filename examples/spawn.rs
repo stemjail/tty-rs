@@ -15,11 +15,11 @@
 #![feature(libc)]
 
 extern crate libc;
-extern crate pty;
+extern crate tty;
 
-use pty::FileDesc;
-use pty::TtyServer;
 use std::process::Command;
+use tty::FileDesc;
+use tty::TtyServer;
 
 fn main() {
     let stdin = FileDesc::new(libc::STDIN_FILENO, false);
