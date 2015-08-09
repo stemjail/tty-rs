@@ -33,7 +33,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
-use termios::{Termio, Termios};
+use termios::{Termios, tcsetattr};
 
 pub use fd::{FileDesc, Pipe};
 
@@ -210,7 +210,7 @@ impl TtyServer {
     pub fn new(template: Option<&FileDesc>) -> io::Result<TtyServer> {
         // Native runtime does not support RtioTTY::get_winsize()
         let pty = match template {
-            Some(t) => try!(openpty(Some(&try!(t.tcgetattr())), Some(&try!(get_winsize(t))))),
+            Some(t) => try!(openpty(Some(&try!(Termios::from_fd(t.as_raw_fd()))), Some(&try!(get_winsize(t))))),
             None => try!(openpty(None, None)),
         };
 
@@ -268,18 +268,15 @@ impl TtyClient {
     /// Setup the peer TTY client (e.g. stdio) and bind it to the master TTY server
     pub fn new(master: FileDesc, peer: FileDesc) -> io::Result<TtyClient> {
         // Setup peer terminal configuration
-        let termios_orig = try!(peer.tcgetattr());
-        let mut termios_peer = try!(peer.tcgetattr());
-        termios_peer.local_flags.remove(termios::ECHO);
-        termios_peer.local_flags.remove(termios::ICANON);
-        termios_peer.local_flags.remove(termios::ISIG);
-        termios_peer.input_flags.remove(termios::IGNBRK);
-        termios_peer.input_flags.insert(termios::BRKINT);
-        termios_peer.input_flags.remove(termios::ICRNL);
-        termios_peer.control_chars[termios::ControlCharacter::VMIN as usize] = 1;
-        termios_peer.control_chars[termios::ControlCharacter::VTIME as usize] = 0;
+        let termios_orig = try!(Termios::from_fd(peer.as_raw_fd()));
+        let mut termios_peer = try!(Termios::from_fd(peer.as_raw_fd()));
+        termios_peer.c_lflag &= !(termios::ECHO | termios::ICANON | termios::ISIG);
+        termios_peer.c_iflag &= !(termios::IGNBRK | termios::ICRNL);
+        termios_peer.c_iflag |= termios::BRKINT;
+        termios_peer.c_cc[termios::VMIN] = 1;
+        termios_peer.c_cc[termios::VTIME] = 0;
         // XXX: cfmakeraw
-        try!(peer.tcsetattr(termios::When::TCSAFLUSH, &termios_peer));
+        try!(tcsetattr(peer.as_raw_fd(), termios::TCSAFLUSH, &termios_peer));
 
         // Create the proxy
         let do_flush_main = Arc::new(AtomicBool::new(false));
@@ -332,6 +329,6 @@ impl Drop for TtyClient {
     /// Cleanup the peer TTY
     fn drop(&mut self) {
         self.do_flush.store(true, Relaxed);
-        let _ = self.peer.tcsetattr(termios::When::TCSAFLUSH, &self.termios_orig);
+        let _ = tcsetattr(self.peer.as_raw_fd(), termios::TCSAFLUSH, &self.termios_orig);
     }
 }

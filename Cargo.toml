@@ -9,5 +9,5 @@ keywords = ["linux", "terminal", "tty"]
 license = "LGPL-3.0"
 exclude = [".gitignore"]
 
-[dependencies.termios]
-path = "../termios.rs"
+[dependencies]
+termios = "*"
