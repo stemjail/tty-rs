@@ -15,10 +15,12 @@
 #![feature(libc)]
 #![feature(process_session_leader)]
 
+extern crate fd;
 extern crate libc;
 extern crate termios;
 
-use libc::{c_char, c_ushort, c_void, size_t, strlen, ssize_t};
+use fd::{Pipe, splice_loop};
+use libc::{c_char, c_ushort, c_void, strlen};
 use std::ffi::CString;
 use std::io;
 use std::mem::transmute;
@@ -35,29 +37,17 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use termios::{Termios, tcsetattr};
 
-pub use fd::{FileDesc, Pipe};
-
-mod fd;
+pub use fd::FileDesc;
 
 mod raw {
+    use libc::{c_char, c_int, c_void};
     use std::os::unix::io::RawFd;
-    use super::libc::{c_char, c_int, c_longlong, size_t, ssize_t, c_uint, c_void};
-
-    // From x86_64-linux-gnu/bits/fcntl-linux.h
-    #[cfg(target_arch="x86_64")]
-    pub const SPLICE_F_NONBLOCK: c_uint = 2;
 
     // From asm-generic/ioctls.h
     pub const TIOCGWINSZ: c_int = 0x5413;
 
-    // From asm-generic/posix_types.h
-    #[allow(non_camel_case_types)]
-    type loff_t = c_longlong;
-
     extern {
         pub fn ioctl(fd: c_int, req: c_int, ...) -> c_int;
-        pub fn splice(fd_in: RawFd, off_in: *mut loff_t, fd_out: RawFd, off_out: *mut loff_t,
-                      len: size_t, flags: c_uint) -> ssize_t;
     }
 
     #[link(name = "util")]
@@ -74,24 +64,6 @@ struct WinSize {
     ws_col: c_ushort,
     ws_xpixel: c_ushort,
     ws_ypixel: c_ushort,
-}
-
-enum SpliceMode {
-    Block,
-    #[allow(dead_code)]
-    NonBlock
-}
-
-// TODO: Replace most &RawFd with AsRawFd
-fn splice(fd_in: &RawFd, fd_out: &RawFd, len: size_t, mode: SpliceMode) -> io::Result<ssize_t> {
-    let flags = match mode {
-        SpliceMode::Block => 0,
-        SpliceMode::NonBlock => raw::SPLICE_F_NONBLOCK,
-    };
-    match unsafe { raw::splice(*fd_in, ptr::null_mut(), *fd_out, ptr::null_mut(), len, flags) } {
-        -1 => Err(io::Error::last_os_error()),
-        s => Ok(s),
-    }
 }
 
 fn get_winsize(fd: &AsRawFd) -> io::Result<WinSize> {
@@ -170,36 +142,6 @@ fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::Result<Pty> {
             })
         }
         _ => Err(io::Error::last_os_error()),
-    }
-}
-
-static SPLICE_BUFFER_SIZE: size_t = 1024;
-
-fn splice_loop(do_flush: Arc<AtomicBool>, flush_event: Option<Sender<()>>, fd_in: RawFd, fd_out: RawFd) {
-    'select: loop {
-        if do_flush.load(Relaxed) {
-            break 'select;
-        }
-        // FIXME: Add a select(2) watching for stdin and a pipe to stop the task
-        // Need pipe to block on (the kernel only look at input)
-        match splice(&fd_in, &fd_out, SPLICE_BUFFER_SIZE, SpliceMode::Block) {
-            Ok(..) => {},
-            Err(e) => {
-                match e.kind() {
-                    io::ErrorKind::BrokenPipe => {},
-                    _ => {
-                        do_flush.store(true, Relaxed);
-                        break 'select;
-                    }
-                }
-            }
-        }
-    }
-    match flush_event {
-        Some(event) => {
-            let _ = event.send(());
-        },
-        None => {}
     }
 }
 
