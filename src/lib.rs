@@ -45,6 +45,7 @@ mod raw {
 
     // From asm-generic/ioctls.h
     pub const TIOCGWINSZ: c_int = 0x5413;
+    pub const FIOCLEX: c_int = 0x5451;
 
     extern {
         pub fn ioctl(fd: c_int, req: c_int, ...) -> c_int;
@@ -122,6 +123,10 @@ fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::Result<Pty> {
             opt2ptr(&termp), opt2ptr(&winp)) } {
         0 => {
             unsafe {
+                // TODO: Fix thread-safe
+                let _ = raw::ioctl(amaster, raw::FIOCLEX);
+                let _ = raw::ioctl(aslave, raw::FIOCLEX);
+
                 // FFI string hack because of the foolish openpty(3) API!
                 let ptr = name.as_ptr() as *const c_char;
                 // Don't lie to Rust about the buffer length from strlen(3)
