@@ -13,31 +13,31 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 use fd::FileDesc;
-use libc::{c_char, c_ushort, c_void, strlen};
-use std::ffi::CString;
+use libc::{self, c_char, c_int, c_uint, c_ushort};
 use std::io;
-use std::mem::transmute;
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::path::PathBuf;
-use std::ptr;
-use termios::Termios;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::io::AsRawFd;
+use std::path::{Path, PathBuf};
+use termios::{self, Termios, tcsetattr};
+
+const DEV_PTMX_PATH: &'static str = "/dev/ptmx";
+const DEV_PTS_PATH: &'static str = "/dev/pts";
 
 mod raw {
-    use libc::{c_char, c_int, c_void};
-    use std::os::unix::io::RawFd;
+    use libc::{c_int, c_uint};
+
+    // From asm-generic/fcntl.h
+    pub const O_CLOEXEC: c_int = 0o2000000;
 
     // From asm-generic/ioctls.h
     pub const TIOCGWINSZ: c_int = 0x5413;
-    pub const FIOCLEX: c_int = 0x5451;
+    pub const TIOCSWINSZ: c_int = 0x5414;
+    pub const TIOCGPTN: c_uint = 0x80045430;
 
     extern {
+        pub fn grantpt(fd: c_int) -> c_int;
         pub fn ioctl(fd: c_int, req: c_int, ...) -> c_int;
-    }
-
-    #[link(name = "util")]
-    extern {
-        pub fn openpty(amaster: *mut RawFd, aslave: *mut RawFd, name: *mut c_char,
-                       termp: *const c_void, winp: *const c_void) -> c_int;
+        pub fn unlockpt(fd: c_int) -> c_int;
     }
 }
 
@@ -63,57 +63,80 @@ pub fn get_winsize<T>(fd: &T) -> io::Result<WinSize> where T: AsRawFd {
     }
 }
 
+fn set_winsize<T>(fd: &T, ws: &WinSize) -> io::Result<()> where T: AsRawFd {
+    match unsafe { raw::ioctl(fd.as_raw_fd(), raw::TIOCSWINSZ, ws) } {
+        0 => Ok(()),
+        _ => Err(io::Error::last_os_error()),
+    }
+}
+
 pub struct Pty {
     pub master: FileDesc,
     pub slave: FileDesc,
     pub path: PathBuf,
 }
 
-// From linux/limits.h
-const MAX_PATH: usize = 4096;
-
-unsafe fn opt2ptr<T>(e: &Option<&T>) -> *const c_void {
-    match e {
-        &Some(p) => transmute(p),
-        &None => ptr::null(),
+fn open_noctty<T>(path: &T) -> io::Result<FileDesc> where T: AsRef<Path> {
+    let flags = raw::O_CLOEXEC | libc::O_NOCTTY | libc::O_RDWR;
+    match unsafe { libc::open(path.as_ref().as_os_str().as_bytes().as_ptr() as *const c_char, flags, 0) } {
+        -1 => Err(io::Error::last_os_error()),
+        fd => Ok(FileDesc::new(fd, true)),
     }
 }
 
-// TODO: Return a StdStream (StdReader + StdWriter) or RtioTTY?
-pub fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::Result<Pty> {
-    let mut amaster: RawFd = -1;
-    let mut aslave: RawFd = -1;
-    let mut name = Vec::with_capacity(MAX_PATH);
+// Need our own `getpt()` to be able to open with O_CLOEXEC
+#[cfg(target_os = "linux")]
+fn getpt() -> io::Result<FileDesc> {
+    open_noctty(&DEV_PTMX_PATH)
+}
 
-    // TODO: Add a lock for future execve because close-on-exec
-    match unsafe { raw::openpty(&mut amaster, &mut aslave, name.as_mut_ptr() as *mut c_char,
-            opt2ptr(&termp), opt2ptr(&winp)) } {
-        0 => {
-            unsafe {
-                // TODO: Fix thread-safe
-                let _ = raw::ioctl(amaster, raw::FIOCLEX);
-                let _ = raw::ioctl(aslave, raw::FIOCLEX);
-
-                // FFI string hack because of the foolish openpty(3) API!
-                let ptr = name.as_ptr() as *const c_char;
-                // Don't lie to Rust about the buffer length from strlen(3)
-                name.set_len(1 +  strlen(ptr) as usize);
-                // Cleanly remove the trailing 0 for CString
-                let _ = name.pop();
-            }
-            let n = try!(CString::new(name));
-            let n = match ::std::str::from_utf8(n.to_bytes()) {
-                Ok(n) => n,
-                Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
-            };
-            // TODO: Add signal handler for SIGWINCH
-            Ok(Pty{
-                master: FileDesc::new(amaster, true),
-                slave: FileDesc::new(aslave, true),
-                path: PathBuf::from(n),
-            })
-        }
+fn grantpt<T>(master: &mut T) -> io::Result<()> where T: AsRawFd {
+    match unsafe { raw::grantpt(master.as_raw_fd()) } {
+        0 => Ok(()),
         _ => Err(io::Error::last_os_error()),
     }
 }
 
+fn unlockpt<T>(master: &mut T) -> io::Result<()> where T: AsRawFd {
+    match unsafe { raw::unlockpt(master.as_raw_fd()) } {
+        0 => Ok(()),
+        _ => Err(io::Error::last_os_error()),
+    }
+}
+
+fn ptsindex<T>(master: &mut T) -> io::Result<u32> where T: AsRawFd {
+    let mut idx: c_uint = 0;
+    match unsafe { raw::ioctl(master.as_raw_fd(), raw::TIOCGPTN as c_int, &mut idx) } {
+        0 => Ok(idx),
+        _ => Err(io::Error::last_os_error()),
+    }
+}
+
+fn ptsname<T>(master: &mut T) -> io::Result<PathBuf> where T: AsRawFd {
+    Ok(Path::new(DEV_PTS_PATH).join(format!("{}", try!(ptsindex(master)))))
+}
+
+/// Thread-safe (i.e. reentrant) version of `openpty(3)`
+pub fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::Result<Pty> {
+    let mut master = try!(getpt());
+    try!(grantpt(&mut master));
+    try!(unlockpt(&mut master));
+    let name = try!(ptsname(&mut master));
+    let slave = try!(open_noctty(&name));
+
+    match termp {
+        Some(t) => try!(tcsetattr(slave.as_raw_fd(), termios::TCSAFLUSH, &t)),
+        None => {}
+    }
+    match winp {
+        Some(w) => try!(set_winsize(&slave, w)),
+        None => {}
+    }
+
+    // TODO: Add signal handler for SIGWINCH
+    Ok(Pty{
+        master: master,
+        slave: slave,
+        path: name,
+    })
+}

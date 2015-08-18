@@ -1,6 +1,6 @@
 # tty-rs
 
-*tty* is a library to create and use a new pseudoterminal (PTY):
+*tty* is a thread-safe library to create and use a new pseudoterminal (PTY):
 * `TtyServer`: create a PTY dedicated to a new command
 * `TtyClient`: forward I/O from an existing TTY (user terminal)
 
