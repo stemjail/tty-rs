@@ -1,4 +1,4 @@
-// Copyright (C) 2014 Mickaël Salaün
+// Copyright (C) 2014-2015 Mickaël Salaün
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
@@ -20,16 +20,12 @@ extern crate libc;
 extern crate termios;
 
 use fd::{Pipe, splice_loop};
-use libc::{c_char, c_ushort, c_void, strlen};
-use std::ffi::CString;
+use ffi::{get_winsize, openpty};
 use std::io;
-use std::mem::transmute;
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::os::unix::io::FromRawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
@@ -39,52 +35,7 @@ use termios::{Termios, tcsetattr};
 
 pub use fd::FileDesc;
 
-mod raw {
-    use libc::{c_char, c_int, c_void};
-    use std::os::unix::io::RawFd;
-
-    // From asm-generic/ioctls.h
-    pub const TIOCGWINSZ: c_int = 0x5413;
-    pub const FIOCLEX: c_int = 0x5451;
-
-    extern {
-        pub fn ioctl(fd: c_int, req: c_int, ...) -> c_int;
-    }
-
-    #[link(name = "util")]
-    extern {
-        pub fn openpty(amaster: *mut RawFd, aslave: *mut RawFd, name: *mut c_char,
-                       termp: *const c_void, winp: *const c_void) -> c_int;
-    }
-}
-
-// From termios.h
-#[repr(C)]
-struct WinSize {
-    ws_row: c_ushort,
-    ws_col: c_ushort,
-    ws_xpixel: c_ushort,
-    ws_ypixel: c_ushort,
-}
-
-fn get_winsize(fd: &AsRawFd) -> io::Result<WinSize> {
-    let mut ws = WinSize {
-        ws_row: 0,
-        ws_col: 0,
-        ws_xpixel: 0,
-        ws_ypixel: 0,
-    };
-    match unsafe { raw::ioctl(fd.as_raw_fd(), raw::TIOCGWINSZ, &mut ws) } {
-        0 => Ok(ws),
-        _ => Err(io::Error::last_os_error()),
-    }
-}
-
-struct Pty {
-    master: FileDesc,
-    slave: FileDesc,
-    path: PathBuf,
-}
+mod ffi;
 
 pub struct TtyServer {
     master: FileDesc,
@@ -101,55 +52,6 @@ pub struct TtyClient {
     do_flush: Arc<AtomicBool>,
     flush_event: Receiver<()>,
 }
-
-// From linux/limits.h
-const MAX_PATH: usize = 4096;
-
-unsafe fn opt2ptr<T>(e: &Option<&T>) -> *const c_void {
-    match e {
-        &Some(p) => transmute(p),
-        &None => ptr::null(),
-    }
-}
-
-// TODO: Return a StdStream (StdReader + StdWriter) or RtioTTY?
-fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::Result<Pty> {
-    let mut amaster: RawFd = -1;
-    let mut aslave: RawFd = -1;
-    let mut name = Vec::with_capacity(MAX_PATH);
-
-    // TODO: Add a lock for future execve because close-on-exec
-    match unsafe { raw::openpty(&mut amaster, &mut aslave, name.as_mut_ptr() as *mut libc::c_char,
-            opt2ptr(&termp), opt2ptr(&winp)) } {
-        0 => {
-            unsafe {
-                // TODO: Fix thread-safe
-                let _ = raw::ioctl(amaster, raw::FIOCLEX);
-                let _ = raw::ioctl(aslave, raw::FIOCLEX);
-
-                // FFI string hack because of the foolish openpty(3) API!
-                let ptr = name.as_ptr() as *const c_char;
-                // Don't lie to Rust about the buffer length from strlen(3)
-                name.set_len(1 +  strlen(ptr) as usize);
-                // Cleanly remove the trailing 0 for CString
-                let _ = name.pop();
-            }
-            let n = try!(CString::new(name));
-            let n = match std::str::from_utf8(n.to_bytes()) {
-                Ok(n) => n,
-                Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
-            };
-            // TODO: Add signal handler for SIGWINCH
-            Ok(Pty{
-                master: FileDesc::new(amaster, true),
-                slave: FileDesc::new(aslave, true),
-                path: PathBuf::from(n),
-            })
-        }
-        _ => Err(io::Error::last_os_error()),
-    }
-}
-
 
 // TODO: Replace most &FileDesc with AsRawFd
 impl TtyServer {
