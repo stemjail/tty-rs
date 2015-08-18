@@ -12,6 +12,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+#![feature(into_raw_os)]
 #![feature(libc)]
 #![feature(process_session_leader)]
 
@@ -21,8 +22,9 @@ extern crate termios;
 
 use fd::{Pipe, splice_loop};
 use ffi::{get_winsize, openpty};
+use std::fs::File;
 use std::io;
-use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -38,8 +40,8 @@ pub use fd::FileDesc;
 pub mod ffi;
 
 pub struct TtyServer {
-    master: FileDesc,
-    slave: Option<FileDesc>,
+    master: File,
+    slave: Option<File>,
     path: PathBuf,
 }
 
@@ -53,7 +55,6 @@ pub struct TtyClient {
     flush_event: Receiver<()>,
 }
 
-// TODO: Replace most &FileDesc with AsRawFd
 impl TtyServer {
     /// Create a new TTY with the same configuration (termios and size) as the `template` TTY
     pub fn new<T>(template: Option<&T>) -> io::Result<TtyServer> where T: AsRawFd {
@@ -71,18 +72,18 @@ impl TtyServer {
     }
 
     /// Bind the peer TTY with the server TTY
-    pub fn new_client(&self, peer: FileDesc) -> io::Result<TtyClient> {
+    pub fn new_client<T>(&self, peer: T) -> io::Result<TtyClient> where T: AsRawFd + IntoRawFd {
         let master = FileDesc::new(self.master.as_raw_fd(), false);
         TtyClient::new(master, peer)
     }
 
     /// Get the TTY master file descriptor usable by a `TtyClient`
-    pub fn get_master(&self) -> &FileDesc {
+    pub fn get_master(&self) -> &File {
         &self.master
     }
 
     /// Take the TTY slave file descriptor to manually pass it to a process
-    pub fn take_slave(&mut self) -> Option<FileDesc> {
+    pub fn take_slave(&mut self) -> Option<File> {
         self.slave.take()
     }
 
@@ -95,7 +96,7 @@ impl TtyServer {
                 cmd.stdin(unsafe { Stdio::from_raw_fd(slave.as_raw_fd()) }).
                     stdout(unsafe { Stdio::from_raw_fd(slave.as_raw_fd()) }).
                     // Must close the slave FD to not wait indefinitely the end of the proxy
-                    stderr(unsafe { Stdio::from_raw_fd(slave.into()) }).
+                    stderr(unsafe { Stdio::from_raw_fd(slave.into_raw_fd()) }).
                     session_leader(true).
                     spawn()
             },
@@ -115,7 +116,8 @@ impl AsRef<Path> for TtyServer {
 // TODO: Replace `spawn` with `scoped` and share variables
 impl TtyClient {
     /// Setup the peer TTY client (e.g. stdio) and bind it to the master TTY server
-    pub fn new(master: FileDesc, peer: FileDesc) -> io::Result<TtyClient> {
+    pub fn new<T, U>(master: T, peer: U) -> io::Result<TtyClient>
+            where T: AsRawFd + IntoRawFd, U: AsRawFd + IntoRawFd {
         // Setup peer terminal configuration
         let termios_orig = try!(Termios::from_fd(peer.as_raw_fd()));
         let mut termios_peer = try!(Termios::from_fd(peer.as_raw_fd()));
@@ -158,8 +160,8 @@ impl TtyClient {
         thread::spawn(move || splice_loop(do_flush, Some(event_tx), p2m_rx.as_raw_fd(), master_fd));
 
         Ok(TtyClient {
-            master: master,
-            peer: peer,
+            master: FileDesc::new(master.into_raw_fd(), true),
+            peer: FileDesc::new(peer.into_raw_fd(), true),
             termios_orig: termios_orig,
             do_flush: do_flush_main,
             flush_event: event_rx,

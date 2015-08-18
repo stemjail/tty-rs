@@ -12,11 +12,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-use fd::FileDesc;
 use libc::{self, c_char, c_int, c_uint, c_ushort};
+use std::fs::File;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::{Path, PathBuf};
 use termios::{self, Termios, tcsetattr};
 
@@ -71,22 +71,22 @@ pub fn set_winsize<T>(slave: &T, ws: &WinSize) -> io::Result<()> where T: AsRawF
 }
 
 pub struct Pty {
-    pub master: FileDesc,
-    pub slave: FileDesc,
+    pub master: File,
+    pub slave: File,
     pub path: PathBuf,
 }
 
-fn open_noctty<T>(path: &T) -> io::Result<FileDesc> where T: AsRef<Path> {
+fn open_noctty<T>(path: &T) -> io::Result<File> where T: AsRef<Path> {
     let flags = raw::O_CLOEXEC | libc::O_NOCTTY | libc::O_RDWR;
     match unsafe { libc::open(path.as_ref().as_os_str().as_bytes().as_ptr() as *const c_char, flags, 0) } {
         -1 => Err(io::Error::last_os_error()),
-        fd => Ok(FileDesc::new(fd, true)),
+        fd => Ok(unsafe { File::from_raw_fd(fd) }),
     }
 }
 
 // Need our own `getpt()` to be able to open with O_CLOEXEC
 #[cfg(target_os = "linux")]
-pub fn getpt() -> io::Result<FileDesc> {
+pub fn getpt() -> io::Result<File> {
     open_noctty(&DEV_PTMX_PATH)
 }
 
