@@ -1,7 +1,7 @@
 [package]
 name = "tty"
-version = "0.2.0"
-authors = ["Mickaël Salaün <mickael.salaun@ssi.gouv.fr>"]
+version = "0.3.0"
+authors = ["Mickaël Salaün <mic@digikod.net>"]
 description = "Create and use pseudoterminal"
 repository = "https://github.com/stemjail/tty-rs"
 readme = "README.md"
