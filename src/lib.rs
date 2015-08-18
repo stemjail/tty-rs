@@ -56,7 +56,7 @@ pub struct TtyClient {
 // TODO: Replace most &FileDesc with AsRawFd
 impl TtyServer {
     /// Create a new TTY with the same configuration (termios and size) as the `template` TTY
-    pub fn new(template: Option<&FileDesc>) -> io::Result<TtyServer> {
+    pub fn new<T>(template: Option<&T>) -> io::Result<TtyServer> where T: AsRawFd {
         // Native runtime does not support RtioTTY::get_winsize()
         let pty = match template {
             Some(t) => try!(openpty(Some(&try!(Termios::from_fd(t.as_raw_fd()))), Some(&try!(get_winsize(t))))),

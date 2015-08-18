@@ -50,7 +50,7 @@ pub struct WinSize {
     ws_ypixel: c_ushort,
 }
 
-pub fn get_winsize(fd: &AsRawFd) -> io::Result<WinSize> {
+pub fn get_winsize<T>(fd: &T) -> io::Result<WinSize> where T: AsRawFd {
     let mut ws = WinSize {
         ws_row: 0,
         ws_col: 0,
