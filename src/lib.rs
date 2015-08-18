@@ -35,7 +35,7 @@ use termios::{Termios, tcsetattr};
 
 pub use fd::FileDesc;
 
-mod ffi;
+pub mod ffi;
 
 pub struct TtyServer {
     master: FileDesc,

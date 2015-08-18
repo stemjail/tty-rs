@@ -50,21 +50,21 @@ pub struct WinSize {
     ws_ypixel: c_ushort,
 }
 
-pub fn get_winsize<T>(fd: &T) -> io::Result<WinSize> where T: AsRawFd {
+pub fn get_winsize<T>(slave: &T) -> io::Result<WinSize> where T: AsRawFd {
     let mut ws = WinSize {
         ws_row: 0,
         ws_col: 0,
         ws_xpixel: 0,
         ws_ypixel: 0,
     };
-    match unsafe { raw::ioctl(fd.as_raw_fd(), raw::TIOCGWINSZ, &mut ws) } {
+    match unsafe { raw::ioctl(slave.as_raw_fd(), raw::TIOCGWINSZ, &mut ws) } {
         0 => Ok(ws),
         _ => Err(io::Error::last_os_error()),
     }
 }
 
-fn set_winsize<T>(fd: &T, ws: &WinSize) -> io::Result<()> where T: AsRawFd {
-    match unsafe { raw::ioctl(fd.as_raw_fd(), raw::TIOCSWINSZ, ws) } {
+pub fn set_winsize<T>(slave: &T, ws: &WinSize) -> io::Result<()> where T: AsRawFd {
+    match unsafe { raw::ioctl(slave.as_raw_fd(), raw::TIOCSWINSZ, ws) } {
         0 => Ok(()),
         _ => Err(io::Error::last_os_error()),
     }
@@ -86,25 +86,25 @@ fn open_noctty<T>(path: &T) -> io::Result<FileDesc> where T: AsRef<Path> {
 
 // Need our own `getpt()` to be able to open with O_CLOEXEC
 #[cfg(target_os = "linux")]
-fn getpt() -> io::Result<FileDesc> {
+pub fn getpt() -> io::Result<FileDesc> {
     open_noctty(&DEV_PTMX_PATH)
 }
 
-fn grantpt<T>(master: &mut T) -> io::Result<()> where T: AsRawFd {
+pub fn grantpt<T>(master: &mut T) -> io::Result<()> where T: AsRawFd {
     match unsafe { raw::grantpt(master.as_raw_fd()) } {
         0 => Ok(()),
         _ => Err(io::Error::last_os_error()),
     }
 }
 
-fn unlockpt<T>(master: &mut T) -> io::Result<()> where T: AsRawFd {
+pub fn unlockpt<T>(master: &mut T) -> io::Result<()> where T: AsRawFd {
     match unsafe { raw::unlockpt(master.as_raw_fd()) } {
         0 => Ok(()),
         _ => Err(io::Error::last_os_error()),
     }
 }
 
-fn ptsindex<T>(master: &mut T) -> io::Result<u32> where T: AsRawFd {
+pub fn ptsindex<T>(master: &mut T) -> io::Result<u32> where T: AsRawFd {
     let mut idx: c_uint = 0;
     match unsafe { raw::ioctl(master.as_raw_fd(), raw::TIOCGPTN as c_int, &mut idx) } {
         0 => Ok(idx),
@@ -112,7 +112,7 @@ fn ptsindex<T>(master: &mut T) -> io::Result<u32> where T: AsRawFd {
     }
 }
 
-fn ptsname<T>(master: &mut T) -> io::Result<PathBuf> where T: AsRawFd {
+pub fn ptsname<T>(master: &mut T) -> io::Result<PathBuf> where T: AsRawFd {
     Ok(Path::new(DEV_PTS_PATH).join(format!("{}", try!(ptsindex(master)))))
 }
 
