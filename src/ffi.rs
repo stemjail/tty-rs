@@ -12,7 +12,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-use libc::{self, c_char, c_int, c_uint, c_ushort};
+use libc::{self, c_int, c_uint, c_ushort};
 use std::ffi::CString;
 use std::fs::File;
 use std::io;
