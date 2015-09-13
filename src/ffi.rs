@@ -13,6 +13,7 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 use libc::{self, c_char, c_int, c_uint, c_ushort};
+use std::ffi::CString;
 use std::fs::File;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
@@ -78,7 +79,9 @@ pub struct Pty {
 
 fn open_noctty<T>(path: &T) -> io::Result<File> where T: AsRef<Path> {
     let flags = raw::O_CLOEXEC | libc::O_NOCTTY | libc::O_RDWR;
-    match unsafe { libc::open(path.as_ref().as_os_str().as_bytes().as_ptr() as *const c_char, flags, 0) } {
+    // The CString unwrap always succeed on unix
+    let cstr = CString::new(path.as_ref().as_os_str().as_bytes()).unwrap();
+    match unsafe { libc::open(cstr.as_ptr(), flags, 0) } {
         -1 => Err(io::Error::last_os_error()),
         fd => Ok(unsafe { File::from_raw_fd(fd) }),
     }
