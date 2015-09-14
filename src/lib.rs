@@ -12,7 +12,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#![feature(into_raw_os)]
 #![feature(libc)]
 #![feature(process_session_leader)]
 
