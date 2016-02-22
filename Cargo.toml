@@ -11,4 +11,5 @@ exclude = [".gitignore"]
 
 [dependencies]
 fd = "*"
+libc = "*"
 termios = "*"
