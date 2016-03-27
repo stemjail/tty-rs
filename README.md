@@ -10,3 +10,5 @@ You need to use a nightly Rust channel >= 1.4.0-dev to build this crate (because
 
 This library is a work in progress.
 The API may change.
+
+This library does not yet support signal handling (e.g. terminal resize, Ctrl-C).
