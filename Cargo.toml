@@ -10,6 +10,6 @@ license = "LGPL-3.0"
 exclude = [".gitignore"]
 
 [dependencies]
-fd = "*"
-libc = "*"
-termios = "*"
+fd = "0.2.*"
+libc = "0.2.*"
+termios = "0.2.*"
