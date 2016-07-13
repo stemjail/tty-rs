@@ -18,8 +18,9 @@ extern crate fd;
 extern crate libc;
 extern crate termios;
 
-use fd::{Pipe, splice_loop};
+use fd::{Pipe, set_flags, splice_loop, unset_append_flag};
 use ffi::{get_winsize, openpty};
+use libc::c_int;
 use std::fs::File;
 use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
@@ -47,7 +48,9 @@ pub struct TtyClient {
     // Need to keep the master file descriptor open
     #[allow(dead_code)]
     master: FileDesc,
+    master_status: Option<c_int>,
     peer: FileDesc,
+    peer_status: Option<c_int>,
     termios_orig: Termios,
     do_flush: Arc<AtomicBool>,
     flush_event: Receiver<()>,
@@ -142,6 +145,7 @@ impl TtyClient {
 
         let do_flush = do_flush_main.clone();
         let peer_fd = peer.as_raw_fd();
+        let peer_status = try!(unset_append_flag(peer_fd));
         thread::spawn(move || splice_loop(do_flush, None, m2p_rx.as_raw_fd(), peer_fd));
 
         // Peer to master
@@ -155,11 +159,14 @@ impl TtyClient {
 
         let do_flush = do_flush_main.clone();
         let master_fd = master.as_raw_fd();
+        let master_status = try!(unset_append_flag(master_fd));
         thread::spawn(move || splice_loop(do_flush, Some(event_tx), p2m_rx.as_raw_fd(), master_fd));
 
         Ok(TtyClient {
             master: FileDesc::new(master.into_raw_fd(), true),
+            master_status: master_status,
             peer: FileDesc::new(peer.into_raw_fd(), true),
+            peer_status: peer_status,
             termios_orig: termios_orig,
             do_flush: do_flush_main,
             flush_event: event_rx,
@@ -179,5 +186,13 @@ impl Drop for TtyClient {
     fn drop(&mut self) {
         self.do_flush.store(true, Relaxed);
         let _ = tcsetattr(self.peer.as_raw_fd(), termios::TCSAFLUSH, &self.termios_orig);
+
+        // Restore the append flag if needed
+        let tty_fd = [(&self.peer, self.peer_status), (&self.master, self.master_status)];
+        for &(fd, status) in tty_fd.iter() {
+            if let Some(s) = status {
+                let _ = set_flags(fd.as_raw_fd(), s);
+            }
+        }
     }
 }
