@@ -31,8 +31,8 @@ fn main() {
         Err(e) => panic!("Error TTY client: {}", e),
     };
 
-    // Should call setsid -c sh
-    let cmd = Command::new("/bin/sh");
+    let mut cmd = Command::new("/usr/bin/setsid");
+    cmd.arg("-c").arg("/bin/sh");
     let process = match server.spawn(cmd) {
         Ok(p) => p,
         Err(e) => panic!("Failed to execute process: {}", e),
