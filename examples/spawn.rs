@@ -1,4 +1,4 @@
-// Copyright (C) 2014 Mickaël Salaün
+// Copyright (C) 2014-2016 Mickaël Salaün
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
@@ -12,21 +12,26 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+extern crate chan_signal;
 extern crate libc;
 extern crate tty;
 
+use chan_signal::Signal;
 use std::process::Command;
 use tty::FileDesc;
 use tty::TtyServer;
 
 fn main() {
+    // Get notifications for terminal resizing before any and all other threads!
+    let signal = chan_signal::notify(&[Signal::WINCH]);
+
     let stdin = FileDesc::new(libc::STDIN_FILENO, false);
     let mut server = match TtyServer::new(Some(&stdin)) {
         Ok(s) => s,
         Err(e) => panic!("Error TTY server: {}", e),
     };
     println!("Got PTY {}", server.as_ref().display());
-    let proxy = match server.new_client(stdin) {
+    let proxy = match server.new_client(stdin, Some(signal)) {
         Ok(p) => p,
         Err(e) => panic!("Error TTY client: {}", e),
     };

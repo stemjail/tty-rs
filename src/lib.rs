@@ -14,12 +14,17 @@
 
 #![feature(process_exec)]
 
+#[macro_use]
+extern crate chan;
+
+extern crate chan_signal;
 extern crate fd;
 extern crate libc;
 extern crate termios;
 
+use chan_signal::Signal;
 use fd::{Pipe, set_flags, splice_loop, unset_append_flag};
-use ffi::{get_winsize, openpty};
+use ffi::{get_winsize, openpty, set_winsize};
 use libc::c_int;
 use std::fs::File;
 use std::io;
@@ -54,6 +59,8 @@ pub struct TtyClient {
     termios_orig: Termios,
     do_flush: Arc<AtomicBool>,
     flush_event: Receiver<()>,
+    // Automatically send an event when dropped
+    _stop: chan::Sender<()>,
 }
 
 impl TtyServer {
@@ -73,9 +80,16 @@ impl TtyServer {
     }
 
     /// Bind the peer TTY with the server TTY
-    pub fn new_client<T>(&self, peer: T) -> io::Result<TtyClient> where T: AsRawFd + IntoRawFd {
+    ///
+    /// The sigwinch_handler must handle the SIGWINCH signal to update the TTY window size.
+    /// This handler can be created with `chan_signal::notify(&[Signal::WINCH])` from the
+    /// chan_signal crate.
+    ///
+    /// Any and all threads spawned must come after the first call to chan_signal::notify!
+    pub fn new_client<T>(&self, peer: T, sigwinch_handler: Option<chan::Receiver<Signal>>) ->
+            io::Result<TtyClient> where T: AsRawFd + IntoRawFd {
         let master = FileDesc::new(self.master.as_raw_fd(), false);
-        TtyClient::new(master, peer)
+        TtyClient::new(master, peer, sigwinch_handler)
     }
 
     /// Get the TTY master file descriptor usable by a `TtyClient`
@@ -116,12 +130,25 @@ impl AsRef<Path> for TtyServer {
     }
 }
 
+// Ignore errors
+fn copy_winsize<T, U>(src: &T, dst: &U) where T: AsRawFd, U: AsRawFd {
+    if let Ok(ws) = get_winsize(src) {
+        let _ = set_winsize(dst, &ws);
+    }
+}
+
 // TODO: Handle SIGWINCH to dynamically update WinSize
 // TODO: Replace `spawn` with `scoped` and share variables
 impl TtyClient {
     /// Setup the peer TTY client (e.g. stdio) and bind it to the master TTY server
-    pub fn new<T, U>(master: T, peer: U) -> io::Result<TtyClient>
-            where T: AsRawFd + IntoRawFd, U: AsRawFd + IntoRawFd {
+    ///
+    /// The sigwinch_handler must handle the SIGWINCH signal to update the TTY window size.
+    /// This handler can be created with `chan_signal::notify(&[Signal::WINCH])` from the
+    /// chan_signal crate.
+    ///
+    /// Any and all threads spawned must come after the first call to chan_signal::notify!
+    pub fn new<T, U>(master: T, peer: U, sigwinch_handler: Option<chan::Receiver<Signal>>) ->
+            io::Result<TtyClient> where T: AsRawFd + IntoRawFd, U: AsRawFd + IntoRawFd {
         // Setup peer terminal configuration
         let termios_orig = try!(Termios::from_fd(peer.as_raw_fd()));
         let mut termios_peer = try!(Termios::from_fd(peer.as_raw_fd()));
@@ -165,6 +192,29 @@ impl TtyClient {
         let master_status = try!(unset_append_flag(master_fd));
         thread::spawn(move || splice_loop(do_flush, Some(event_tx), p2m_rx.as_raw_fd(), master_fd));
 
+        // Handle terminal resizing
+        let (stop_tx, stop_rx) = chan::sync(0);
+        if let Some(signal) = sigwinch_handler {
+            // master and peer FD will be close by TtyClient::drop()
+            let master2 = FileDesc::new(master.as_raw_fd(), false);
+            let peer2 = FileDesc::new(peer.as_raw_fd(), false);
+            thread::spawn(move || {
+                'select: loop {
+                    chan_select! {
+                        signal.recv() -> signal => {
+                            if signal != Some(Signal::WINCH) {
+                                continue 'select;
+                            }
+                            copy_winsize(&peer2, &master2);
+                        },
+                        stop_rx.recv() => {
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+
         Ok(TtyClient {
             master: FileDesc::new(master.into_raw_fd(), true),
             master_status: master_status,
@@ -173,6 +223,7 @@ impl TtyClient {
             termios_orig: termios_orig,
             do_flush: do_flush_main,
             flush_event: event_rx,
+            _stop: stop_tx,
         })
     }
 
@@ -181,6 +232,11 @@ impl TtyClient {
         while !self.do_flush.load(Relaxed) {
             let _ = self.flush_event.recv();
         }
+    }
+
+    /// Update the terminal window size according to the peer
+    pub fn update_winsize(&mut self) {
+        copy_winsize(&self.peer, &self.master);
     }
 }
 

@@ -12,6 +12,8 @@ license = "LGPL-3.0"
 exclude = [".gitignore"]
 
 [dependencies]
+chan = "0.1"
+chan-signal = "0.1.7"
 fd = "0.2.2"
 libc = "0.2.*"
 termios = "0.2.*"
