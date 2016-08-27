@@ -12,7 +12,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#![feature(process_session_leader)]
+#![feature(process_exec)]
 
 extern crate fd;
 extern crate libc;
@@ -98,7 +98,7 @@ impl TtyServer {
                     stdout(unsafe { Stdio::from_raw_fd(slave.as_raw_fd()) }).
                     // Must close the slave FD to not wait indefinitely the end of the proxy
                     stderr(unsafe { Stdio::from_raw_fd(slave.into_raw_fd()) }).
-                    session_leader(true).
+                    before_exec(|| { let _ = unsafe { libc::setsid() }; Ok(()) }).
                     spawn()
             },
             None => Err(io::Error::new(io::ErrorKind::BrokenPipe, "No TTY slave")),
