@@ -1,6 +1,6 @@
 [package]
 name = "tty"
-version = "0.4.5"
+version = "0.5.0"
 authors = ["Mickaël Salaün <mic@digikod.net>"]
 description = "Create and use pseudoterminal"
 documentation = "https://stemjail.github.io/rustdoc/tty/"
