@@ -6,7 +6,7 @@
 
 The I/O forward uses `splice(2)`, which is Linux specific, enabling zero-copy transfers.
 
-You need to use a nightly Rust channel >= 1.8.0-dev to build this crate (because of unstable API use).
+Build with Rust >= 1.15.0 .
 
 This library is a work in progress.
 The API may change.
