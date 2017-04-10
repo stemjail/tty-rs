@@ -253,3 +253,33 @@ impl Drop for TtyClient {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_openpty_race(cmd: &str) -> io::Result<Child> {
+
+        let mut tty = TtyServer::new::<FileDesc>(None).unwrap();
+        let mut cmd = Command::new(&cmd);
+        cmd.env_clear();
+
+        tty.spawn(cmd)
+    }
+
+    #[test]
+    fn openpty_race_true() {
+        for _ in 1..1000 {
+            let mut process = create_openpty_race("/bin/true").unwrap();
+            assert_eq!(process.wait().unwrap().code().unwrap(), 0);
+        }
+    }
+
+    #[test]
+    fn openpty_race_false() {
+        for _ in 1..1000 {
+            let mut process = create_openpty_race("/bin/false").unwrap();
+            assert_ne!(process.wait().unwrap().code().unwrap(), 0);
+        }
+    }
+}
