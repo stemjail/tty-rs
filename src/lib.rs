@@ -102,22 +102,28 @@ impl TtyServer {
 
     /// Spawn a new process connected to the slave TTY
     pub fn spawn(&mut self, mut cmd: Command) -> io::Result<Child> {
-        match self.slave.take() {
-            Some(slave) => {
-                // Force new session
-                // TODO: tcsetpgrp
-                cmd.stdin(unsafe { Stdio::from_raw_fd(slave.as_raw_fd()) }).
-                    stdout(unsafe { Stdio::from_raw_fd(slave.as_raw_fd()) }).
-                    // Must close the slave FD to not wait indefinitely the end of the proxy
-                    stderr(unsafe { Stdio::from_raw_fd(slave.into_raw_fd()) }).
-                    // Don't check the error of setsid because it fails if we're the
-                    // process leader already. We just forked so it shouldn't return
-                    // error, but ignore it anyway.
-                    before_exec(|| { let _ = unsafe { libc::setsid() }; Ok(()) }).
-                    spawn()
-            },
-            None => Err(io::Error::new(io::ErrorKind::BrokenPipe, "No TTY slave")),
-        }
+
+        let slave = match self.slave.take() {
+            Some(slave) => slave,
+            None => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "No TTY slave")),
+        };
+
+        let new_slave = FileDesc::new(slave.as_raw_fd(), false);
+        let stdin_fd = new_slave.dup().unwrap();
+        let stdout_fd = new_slave.dup().unwrap();
+        let stderr_fd = new_slave.dup().unwrap();
+
+        let child = cmd.stdin(unsafe { Stdio::from_raw_fd(stdout_fd.into_raw_fd()) }).
+                        stdout(unsafe { Stdio::from_raw_fd(stdin_fd.into_raw_fd()) }).
+                        // Must close the slave FD to not wait indefinitely the end of the proxy
+                        stderr(unsafe { Stdio::from_raw_fd(stderr_fd.into_raw_fd()) }).
+                        // Don't check the error of setsid because it fails if we're the
+                        // process leader already. We just forked so it shouldn't return
+                        // error, but ignore it anyway.
+                        before_exec(|| { let _ = unsafe { libc::setsid() }; Ok(()) }).
+                        spawn();
+
+        child
     }
 }
 
