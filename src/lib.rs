@@ -66,8 +66,8 @@ impl TtyServer {
     pub fn new<T>(template: Option<&T>) -> io::Result<TtyServer> where T: AsRawFd {
         // Native runtime does not support RtioTTY::get_winsize()
         let pty = match template {
-            Some(t) => try!(openpty(Some(&try!(Termios::from_fd(t.as_raw_fd()))), Some(&try!(get_winsize(t))))),
-            None => try!(openpty(None, None)),
+            Some(t) => openpty(Some(&Termios::from_fd(t.as_raw_fd())?), Some(&get_winsize(t)?))?,
+            None => openpty(None, None)?,
         };
 
         Ok(TtyServer {
@@ -148,15 +148,15 @@ impl TtyClient {
     pub fn new<T, U>(master: T, peer: U, sigwinch_handler: Option<chan::Receiver<Signal>>) ->
             io::Result<TtyClient> where T: AsRawFd + IntoRawFd, U: AsRawFd + IntoRawFd {
         // Setup peer terminal configuration
-        let termios_orig = try!(Termios::from_fd(peer.as_raw_fd()));
-        let mut termios_peer = try!(Termios::from_fd(peer.as_raw_fd()));
+        let termios_orig = Termios::from_fd(peer.as_raw_fd())?;
+        let mut termios_peer = Termios::from_fd(peer.as_raw_fd())?;
         termios_peer.c_lflag &= !(termios::ECHO | termios::ICANON | termios::ISIG);
         termios_peer.c_iflag &= !(termios::IGNBRK | termios::ICRNL);
         termios_peer.c_iflag |= termios::BRKINT;
         termios_peer.c_cc[termios::VMIN] = 1;
         termios_peer.c_cc[termios::VTIME] = 0;
         // XXX: cfmakeraw
-        try!(tcsetattr(peer.as_raw_fd(), termios::TCSAFLUSH, &termios_peer));
+        tcsetattr(peer.as_raw_fd(), termios::TCSAFLUSH, &termios_peer)?;
 
         // Create the proxy
         let do_flush_main = Arc::new(AtomicBool::new(false));
@@ -173,7 +173,7 @@ impl TtyClient {
 
         let do_flush = do_flush_main.clone();
         let peer_fd = peer.as_raw_fd();
-        let peer_status = try!(unset_append_flag(peer_fd));
+        let peer_status = unset_append_flag(peer_fd)?;
         thread::spawn(move || splice_loop(do_flush, None, m2p_rx.as_raw_fd(), peer_fd));
 
         // Peer to master
@@ -187,7 +187,7 @@ impl TtyClient {
 
         let do_flush = do_flush_main.clone();
         let master_fd = master.as_raw_fd();
-        let master_status = try!(unset_append_flag(master_fd));
+        let master_status = unset_append_flag(master_fd)?;
         thread::spawn(move || splice_loop(do_flush, Some(event_tx), p2m_rx.as_raw_fd(), master_fd));
 
         // Handle terminal resizing

@@ -116,23 +116,23 @@ pub fn ptsindex<T>(master: &mut T) -> io::Result<u32> where T: AsRawFd {
 }
 
 pub fn ptsname<T>(master: &mut T) -> io::Result<PathBuf> where T: AsRawFd {
-    Ok(Path::new(DEV_PTS_PATH).join(format!("{}", try!(ptsindex(master)))))
+    Ok(Path::new(DEV_PTS_PATH).join(format!("{}", ptsindex(master)?)))
 }
 
 /// Thread-safe (i.e. reentrant) version of `openpty(3)`
 pub fn openpty(termp: Option<&Termios>, winp: Option<&WinSize>) -> io::Result<Pty> {
-    let mut master = try!(getpt());
-    try!(grantpt(&mut master));
-    try!(unlockpt(&mut master));
-    let name = try!(ptsname(&mut master));
-    let slave = try!(open_noctty(&name));
+    let mut master = getpt()?;
+    grantpt(&mut master)?;
+    unlockpt(&mut master)?;
+    let name = ptsname(&mut master)?;
+    let slave = open_noctty(&name)?;
 
     match termp {
-        Some(t) => try!(tcsetattr(slave.as_raw_fd(), termios::TCSAFLUSH, &t)),
+        Some(t) => tcsetattr(slave.as_raw_fd(), termios::TCSAFLUSH, &t)?,
         None => {}
     }
     match winp {
-        Some(w) => try!(set_winsize(&slave, w)),
+        Some(w) => set_winsize(&slave, w)?,
         None => {}
     }
 
