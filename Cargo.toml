@@ -13,7 +13,7 @@ exclude = [".gitignore"]
 
 [dependencies]
 chan = "0.1"
-chan-signal = "0.2"
-fd = "0.2.2"
+chan-signal = "0.3"
+fd = "0.2.3"
 libc = "0.2.*"
-termios = "0.2.*"
+termios = "0.3.*"
